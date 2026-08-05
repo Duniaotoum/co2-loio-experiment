@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Can AI Calibrate an Unseen CO2 Isotopologue?</title>
+<style>
+  /* ================= DESIGN TOKENS (offline; system fonts only) ================= */
+  :root{
+    --bg:#0a1626; --bg2:#102138; --bg3:#16304f;
+    --paper:#eef3f6; --ink:#0e1a2b; --ink-dim:#54677d;
+    --text:#eef4f8; --dim:#93abc2; --dim2:#5a6e84;
+    --accent:#53c8f0;      /* interface accent */
+    --ames:#f2a95c;        /* Ames-2021 */
+    --cdsd:#8fb8f0;        /* CDSD-296 */
+    --gold:#f2c14e;        /* mean baseline */
+    --marvel:#e88fd0;      /* MARVEL empirical */
+    --ml:#5fe8b0;          /* ML residual */
+    --withheld:#f07862;    /* withheld chamber */
+    --line:rgba(238,243,246,.10); --line-strong:rgba(238,243,246,.28);
+    --font-ui:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-mono:ui-monospace, 'SF Mono', 'Cascadia Mono', 'Segoe UI Mono', Consolas, Menlo, monospace;
+  }
+  *{ box-sizing:border-box; }
+  html, body{ height:100%; }
+  body{
+    margin:0; color:var(--text); font-family:var(--font-ui); font-size:16px; line-height:1.6;
+    -webkit-font-smoothing:antialiased; background-color:var(--bg);
+    background-image:linear-gradient(var(--line) 1px, transparent 1px),
+                     linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size:36px 36px;
+    display:flex; flex-direction:column; min-height:100vh; overflow-x:hidden;
+  }
+  h1,h2{ font-weight:700; margin:0; letter-spacing:-.01em; }
+  p{ margin:0; }
+  button{ font-family:inherit; cursor:pointer; font-size:1rem; }
+  :focus-visible{ outline:3px solid var(--accent); outline-offset:3px; }
+  sub{ font-size:.72em; } sup{ font-size:.72em; }
+  .mono{ font-family:var(--font-mono); }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:.01ms !important; transition-duration:.01ms !important; }
+  }
+
+  /* ================= FRAME ================= */
+  .top-bar{ flex:0 0 auto; display:flex; justify-content:space-between; align-items:center; padding:14px 22px; gap:12px; }
+  .brand{ font-size:.78rem; letter-spacing:.14em; text-transform:uppercase; color:var(--dim2); font-family:var(--font-mono); }
+  .brand b{ color:var(--accent); font-weight:600; }
+  .top-controls{ display:flex; gap:.6rem; align-items:center; }
+  .restart-btn{ font-size:.8rem; padding:.45rem .9rem; border:1.5px solid var(--line-strong); background:transparent; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; }
+  .restart-btn:hover{ border-color:var(--accent); color:var(--text); }
+  .progress-dots{ display:flex; gap:6px; }
+  .progress-dots span{ width:7px; height:7px; border-radius:50%; background:var(--line-strong); transition:background .3s, transform .3s; }
+  .progress-dots span.is-active{ background:var(--accent); transform:scale(1.35); }
+  .progress-dots span.is-done{ background:var(--ml); }
+
+  .stage-outer{ flex:1 1 auto; position:relative; overflow:hidden; display:flex; align-items:flex-start; justify-content:center; padding:8px 18px 22px; min-height:0; overflow-y:auto; }
+  .stage-inner{ width:100%; max-width:900px; transition:transform .5s cubic-bezier(.4,0,.2,1), opacity .42s ease; }
+  .stage-inner.is-exiting{ transform:translateX(-70px); opacity:0; }
+  .stage-inner.is-entering{ transform:translateX(70px); opacity:0; }
+
+  /* dev error panel (runtime validation failures) */
+  .dev-error{ position:fixed; inset:auto 0 0 0; background:#5a1010; color:#ffdede; font-family:var(--font-mono); font-size:.85rem; padding:.9rem 1.2rem; z-index:99; display:none; }
+  .dev-error.is-visible{ display:block; }
+
+  /* ================= SHARED ================= */
+  .iso-tag{ font-size:.85rem; color:var(--dim); text-align:center; margin-bottom:1.2rem; letter-spacing:.03em; font-family:var(--font-mono); }
+  .iso-tag strong{ color:var(--accent); font-size:1rem; }
+  .scene-tag{ font-size:.75rem; letter-spacing:.15em; text-align:center; color:var(--accent); margin-bottom:.5rem; text-transform:uppercase; font-family:var(--font-mono); }
+  .scene-title{ font-size:clamp(1.35rem,3.2vw,1.9rem); text-align:center; margin-bottom:1.1rem; }
+  .scene-msg{ text-align:center; color:var(--dim); font-size:1rem; max-width:54ch; margin:0 auto 1.3rem; line-height:1.65; }
+  .scene-msg strong{ color:var(--text); }
+  .fine{ font-size:.8rem; text-align:center; color:var(--dim); border:1px dashed var(--line-strong); padding:.6rem .9rem; margin:.9rem auto 0; max-width:62ch; line-height:1.55; }
+  .btn{ display:inline-block; letter-spacing:.05em; padding:.85rem 1.8rem; border:none; background:var(--accent); color:var(--bg); font-weight:700; text-transform:uppercase; min-height:48px; }
+  .btn-ghost{ background:transparent; border:1.5px solid var(--line-strong); color:var(--text); font-weight:600; }
+  .btn-ghost:hover{ border-color:var(--accent); }
+  .btn-row{ display:flex; gap:.8rem; justify-content:center; flex-wrap:wrap; margin-top:1.4rem; }
+
+  /* ================= SCENE 1 ================= */
+  .open-wrap{ text-align:center; padding:2rem 0 1rem; }
+  .co2-svg{ width:min(320px,66vw); height:auto; margin:0 auto 1.4rem; display:block; }
+  .co2-svg .atom-o{ fill:var(--withheld); } .co2-svg .atom-c{ fill:var(--dim); }
+  .co2-svg .bond{ stroke:var(--line-strong); stroke-width:3; }
+  .co2-svg text{ fill:var(--dim); font-family:var(--font-mono); font-size:12px; }
+  @keyframes stR{ 0%,100%{ transform:translateX(0);} 50%{ transform:translateX(6px);} }
+  @keyframes stL{ 0%,100%{ transform:translateX(0);} 50%{ transform:translateX(-6px);} }
+  .co2-svg .o-r{ animation:stR 4.5s ease-in-out infinite; }
+  .co2-svg .o-l{ animation:stL 4.5s ease-in-out infinite; }
+  .open-title{ font-size:clamp(1.6rem,4.4vw,2.4rem); max-width:22ch; margin:0 auto 1rem; }
+  .open-sub{ color:var(--dim); font-size:1.05rem; max-width:46ch; margin:0 auto 1.7rem; line-height:1.7; }
+
+  /* ================= SCENE 2 — POOL ================= */
+  .pool{ display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); gap:.8rem; max-width:660px; margin:0 auto 1rem; }
+  .token{
+    display:flex; flex-direction:column; align-items:center; gap:.35rem;
+    padding:.85rem .5rem .7rem; border:2px solid var(--line-strong); background:var(--bg2);
+    color:var(--text); transition:border-color .18s, transform .18s; min-height:86px;
+  }
+  .token:hover{ border-color:var(--accent); transform:translateY(-2px); }
+  .token.is-selected{ border-color:var(--accent); background:var(--bg3); }
+  .token.is-visited{ border-style:dashed; border-color:var(--ml); }
+  .token .code{ font-family:var(--font-mono); font-weight:700; font-size:1.05rem; }
+  .token svg{ width:56px; height:16px; }
+  .token .t-o{ fill:var(--withheld); } .token .t-c{ fill:var(--dim); } .token .t-b{ stroke:var(--line-strong); stroke-width:1.5; }
+  .confirm-line{ text-align:center; font-size:1rem; min-height:1.7em; margin-bottom:.2rem; }
+  .confirm-line b{ color:var(--accent); }
+
+  /* ================= SCENE 3 — REMOVAL ================= */
+  .removal-svg{ width:min(640px,94vw); height:auto; display:block; margin:0 auto .8rem; }
+  .removal-svg .pool-tile rect{ fill:var(--bg2); stroke:var(--line-strong); stroke-width:1.4; }
+  .removal-svg .pool-tile text{ fill:var(--dim); font-family:var(--font-mono); font-size:11px; }
+  .removal-svg .sel-tile rect{ fill:var(--bg3); stroke:var(--accent); stroke-width:2; }
+  .removal-svg .sel-tile text{ fill:var(--text); font-family:var(--font-mono); font-size:11px; font-weight:700; }
+  .removal-svg .chamber{ fill:none; stroke:var(--withheld); stroke-width:2; stroke-dasharray:6 5; }
+  .removal-svg .chamber-label{ fill:var(--withheld); font-family:var(--font-mono); font-size:11px; font-weight:700; }
+  .removal-svg .arm{ stroke:var(--dim); stroke-width:5; stroke-linecap:round; fill:none; }
+  .removal-svg .arm-claw{ stroke:var(--accent); stroke-width:3; fill:none; stroke-linecap:round; }
+  .arm-group, .carried{ transition:transform 1.6s cubic-bezier(.4,0,.2,1); }
+
+  /* ================= SCENE 4 — TRAINING ================= */
+  .train-svg{ width:min(620px,94vw); height:auto; display:block; margin:0 auto .6rem; }
+  .train-svg .tt rect{ fill:var(--bg2); stroke:var(--line-strong); stroke-width:1.2; }
+  .train-svg .tt text{ fill:var(--dim); font-family:var(--font-mono); font-size:10px; }
+  .train-svg .chamber{ fill:none; stroke:var(--accent); stroke-width:1.6; }
+  .train-svg .chamber-label{ fill:var(--accent); font-family:var(--font-mono); font-size:11px; }
+  .train-svg .flow{ stroke:var(--accent); stroke-width:1.3; fill:none; stroke-dasharray:4 6; animation:fdash 1.3s linear infinite; opacity:.6; }
+  @keyframes fdash{ to{ stroke-dashoffset:-20; } }
+  .record-strip{ font-family:var(--font-mono); font-size:.85rem; text-align:center; color:var(--dim); border:1px solid var(--line-strong); padding:.6rem .8rem; max-width:560px; margin:0 auto .9rem; overflow-x:hidden; }
+  .eq-line{ text-align:center; font-family:var(--font-mono); font-size:clamp(.9rem,2.4vw,1.05rem); margin:.35rem 0; }
+  .eq-line .hl{ color:var(--gold); }
+  .eq-line .hl2{ color:var(--marvel); }
+
+  /* ================= SCENE 5 — FEATURES ================= */
+  .feat-group-title{ text-align:center; font-size:1.05rem; margin:.6rem 0 .9rem; color:var(--text); }
+  .feat-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(200px,1fr)); gap:.7rem; max-width:700px; margin:0 auto 1rem; }
+  .feat-card{ border:1.5px solid var(--line-strong); padding:.8rem .9rem; }
+  .feat-card .sym{ font-family:var(--font-mono); font-weight:700; font-size:1.05rem; color:var(--accent); }
+  .feat-card .desc{ font-size:.88rem; color:var(--dim); line-height:1.5; }
+  .feat-card.diag .sym{ color:var(--gold); }
+  .mode-svg{ width:200px; height:52px; display:block; margin:.6rem auto 0; }
+  .mode-svg .m-o{ fill:var(--withheld); } .mode-svg .m-c{ fill:var(--dim); } .mode-svg .m-b{ stroke:var(--line-strong); stroke-width:2; }
+  @keyframes m1r{ 0%,100%{transform:translateX(0);} 50%{transform:translateX(5px);} }
+  @keyframes m1l{ 0%,100%{transform:translateX(0);} 50%{transform:translateX(-5px);} }
+  @keyframes m2{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(-6px);} }
+  @keyframes m3r{ 0%,100%{transform:translateX(0);} 50%{transform:translateX(5px);} }
+  @keyframes m3l{ 0%,100%{transform:translateX(0);} 50%{transform:translateX(2px);} }
+  .mode-v1 .mo-l{ animation:m1l 2.6s ease-in-out infinite; } .mode-v1 .mo-r{ animation:m1r 2.6s ease-in-out infinite; }
+  .mode-v2 .mo-c{ animation:m2 2.6s ease-in-out infinite; }
+  .mode-v3 .mo-l{ animation:m3l 2.6s ease-in-out infinite; } .mode-v3 .mo-r{ animation:m3r 2.6s ease-in-out infinite; }
+
+  /* ================= SCENE 6 — TREE JOURNEY ================= */
+  .tj-layout{ display:grid; grid-template-columns:1fr; gap:.6rem; }
+  .tj-intro{ text-align:center; font-size:1rem; color:var(--text); min-height:1.7em; }
+  .tj-intro .tno{ color:var(--accent); font-family:var(--font-mono); }
+  .tree-svg{ width:min(680px,94vw); height:auto; display:block; margin:0 auto; }
+  .tree-svg .e{ stroke:var(--line-strong); stroke-width:2; transition:stroke .4s, opacity .4s; }
+  .tree-svg .e.on{ stroke:var(--accent); stroke-width:3.4; }
+  .tree-svg .e.off{ opacity:.15; }
+  .tree-svg .n rect{ fill:var(--bg2); stroke:var(--line-strong); stroke-width:1.5; transition:stroke .35s, opacity .4s; }
+  .tree-svg .n text{ fill:var(--text); font-family:var(--font-mono); font-size:12.5px; }
+  .tree-svg .n.on rect{ stroke:var(--accent); stroke-width:2.2; }
+  .tree-svg .n.off{ opacity:.15; }
+  .tree-svg .lf rect{ fill:var(--bg2); stroke:var(--line-strong); stroke-width:1.5; transition:fill .4s, stroke .4s, opacity .4s; }
+  .tree-svg .lf text{ fill:var(--dim); font-family:var(--font-mono); font-size:12px; font-weight:700; }
+  .tree-svg .lf.on rect{ fill:var(--ml); stroke:var(--ml); }
+  .tree-svg .lf.on text{ fill:var(--bg); }
+  .tree-svg .lf.off{ opacity:.15; }
+  .tj-featval{ text-align:center; font-family:var(--font-mono); font-size:.95rem; color:var(--gold); min-height:1.6em; }
+  .accum{ max-width:520px; margin:.7rem auto 0; border:2px solid var(--line-strong); padding:.9rem 1.2rem; text-align:center; }
+  .accum .lbl{ font-size:.78rem; text-transform:uppercase; letter-spacing:.1em; color:var(--dim2); font-family:var(--font-mono); }
+  .accum .val{ font-family:var(--font-mono); font-size:clamp(1.2rem,3.4vw,1.6rem); font-weight:700; color:var(--ml); }
+  .accum .sub{ font-size:.78rem; color:var(--dim); font-family:var(--font-mono); }
+  .tj-controls{ display:flex; gap:.6rem; justify-content:center; flex-wrap:wrap; margin-top:1rem; }
+  .tj-controls .btn, .tj-controls .btn-ghost{ min-height:46px; padding:.6rem 1.1rem; font-size:.88rem; }
+
+  /* ================= SCENES 7–9 ================= */
+  .three-cols{ display:grid; grid-template-columns:repeat(auto-fit, minmax(170px,1fr)); gap:.8rem; max-width:680px; margin:0 auto 1rem; }
+  .col-box{ border:2px solid var(--line-strong); padding:.9rem .7rem; text-align:center; }
+  .col-box .lbl{ font-size:.72rem; color:var(--dim2); text-transform:uppercase; letter-spacing:.06em; display:block; margin-bottom:.3rem; font-family:var(--font-mono); }
+  .col-box .val{ font-family:var(--font-mono); font-size:1.02rem; font-weight:700; }
+  .col-box.mean{ border-color:var(--gold); } .col-box.corr{ border-color:var(--accent); }
+  .col-box.final{ border-color:var(--ml); } .col-box.marv{ border-color:var(--marvel); }
+  .headline-swap{ text-align:center; font-size:1.12rem; margin-bottom:1rem; font-family:var(--font-mono); }
+  .headline-swap .arrow{ color:var(--dim); margin:0 .45rem; }
+  .headline-swap .after{ color:var(--ml); font-weight:700; }
+  .mae-chart{ background:var(--paper); padding:1.4rem 1rem .4rem; margin-bottom:.3rem; }
+  .mae-bars{ display:flex; gap:.8rem; justify-content:space-around; }
+  .mae-bar{ display:flex; flex-direction:column; align-items:center; flex:1 1 0; min-width:0; }
+  .mae-bar-value{ font-family:var(--font-mono); font-size:.78rem; color:var(--ink); margin-bottom:.3rem; white-space:nowrap; }
+  .mae-bar-track{ position:relative; width:min(32px,58%); height:128px; }
+  .mae-bar-fill{ position:absolute; bottom:0; left:0; width:100%; height:0; background:var(--c); transition:height .9s cubic-bezier(.16,.8,.24,1); min-height:3px; }
+  .mae-bar-label{ font-size:.74rem; color:var(--ink-dim); margin-top:.4rem; text-align:center; }
+  .scale-note{ text-align:center; font-size:.74rem; color:var(--ink-dim); padding-bottom:.7rem; background:var(--paper); margin:0 0 1rem; }
+  .bonus-stats{ display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:.7rem; margin-bottom:.9rem; }
+  .bonus-stat{ text-align:center; border:1px solid var(--line); padding:.7rem .5rem; }
+  .bonus-stat .big{ font-family:var(--font-mono); font-size:1.02rem; color:var(--text); display:block; font-weight:700; }
+  .bonus-stat .small{ font-size:.76rem; color:var(--dim); }
+  .claim{ text-align:center; font-size:1rem; color:var(--text); margin-bottom:.5rem; }
+
+  /* ================= SCENE 10 ================= */
+  .cmp-rows{ max-width:660px; margin:0 auto 1rem; }
+  .cmp-row{ display:grid; grid-template-columns:46px 1fr 56px; align-items:center; gap:.7rem; padding:.44rem 0; border-bottom:1px solid var(--line); }
+  .cmp-row:last-child{ border-bottom:none; }
+  .cmp-iso{ font-family:var(--font-mono); font-size:.88rem; font-weight:700; }
+  .cmp-iso.is-visited{ color:var(--ml); }
+  .cmp-track{ position:relative; height:10px; background:var(--line); border-radius:5px; }
+  .cmp-conn{ position:absolute; top:50%; height:2px; background:var(--dim2); transform:translateY(-50%); }
+  .cmp-dot{ position:absolute; top:50%; width:9px; height:9px; border-radius:50%; transform:translate(-50%,-50%); }
+  .cmp-dot.b{ background:var(--gold); } .cmp-dot.a{ background:var(--ml); }
+  .cmp-factor{ font-family:var(--font-mono); font-size:.82rem; color:var(--ml); text-align:right; font-weight:600; }
+  .cmp-legend{ text-align:center; font-size:.78rem; color:var(--dim2); margin-bottom:.5rem; }
+  .cmp-legend i{ display:inline-block; width:8px; height:8px; border-radius:50%; margin:0 .3rem 0 1rem; }
+  .tech{ max-width:680px; margin:0 auto; text-align:left; font-size:.9rem; color:var(--dim); line-height:1.7; }
+  .tech h3{ color:var(--text); font-size:1rem; margin:1.1rem 0 .3rem; }
+  .tech table{ border-collapse:collapse; font-family:var(--font-mono); font-size:.82rem; margin:.4rem 0; }
+  .tech td{ border:1px solid var(--line-strong); padding:.3rem .6rem; }
+
+  @media (max-width:600px){
+    .top-bar{ padding:10px 12px; flex-wrap:wrap; }
+    .stage-outer{ padding:4px 12px 14px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top-bar">
+  <span class="brand">HRMS PRAHA2026 · <b>LOIO Experiment</b></span>
+  <div class="top-controls">
+    <nav class="progress-dots" id="progressDots" aria-label="Progress"></nav>
+    <button class="restart-btn" id="globalRestart" aria-label="Restart the experience">Restart</button>
+  </div>
+</header>
+
+<main class="stage-outer">
+  <div class="stage-inner" id="stageInner" aria-live="polite"></div>
+</main>
+
+<div class="dev-error" id="devError" role="alert"></div>
+
+<script>
+'use strict';
+/* =====================================================================
+   SECTION 1 — SCIENTIFIC DATA
+   All numeric values verified against the manuscript and the authors'
+   exported LOIO models (dump_model per fold) and results.csv.
+   ===================================================================== */
+
+// Fold-level LOIO results (manuscript Table: LOIO performance and expansion)
+var LOIO_RESULTS = {
+  '626': { Neval:7825,  Ninf:18729, exp:'3.4\u00d7',  mae:{ames:0.015332, cdsd:0.001515, mean:0.007713, ml:0.001706} },
+  '627': { Neval:4845,  Ninf:45230, exp:'10.3\u00d7', mae:{ames:0.011709, cdsd:0.000792, mean:0.005933, ml:0.000841} },
+  '628': { Neval:8762,  Ninf:43277, exp:'5.9\u00d7',  mae:{ames:0.021771, cdsd:0.001700, mean:0.011167, ml:0.001875} },
+  '636': { Neval:6290,  Ninf:20761, exp:'4.3\u00d7',  mae:{ames:0.016172, cdsd:0.001637, mean:0.008339, ml:0.001909} },
+  '637': { Neval:1960,  Ninf:48711, exp:'25.9\u00d7', mae:{ames:0.014276, cdsd:0.001122, mean:0.007098, ml:0.001228} },
+  '638': { Neval:3900,  Ninf:48666, exp:'13.5\u00d7', mae:{ames:0.023345, cdsd:0.001618, mean:0.011936, ml:0.001735} },
+  '727': { Neval:3277,  Ninf:46108, exp:'15.1\u00d7', mae:{ames:0.016741, cdsd:0.000725, mean:0.008419, ml:0.000821} },
+  '728': { Neval:4318,  Ninf:46806, exp:'11.8\u00d7', mae:{ames:0.024244, cdsd:0.001023, mean:0.012108, ml:0.001133} },
+  '737': { Neval:1639,  Ninf:61217, exp:'38.4\u00d7', mae:{ames:0.017357, cdsd:0.001366, mean:0.008751, ml:0.001438} },
+  '738': { Neval:945,   Ninf:50571, exp:'54.5\u00d7', mae:{ames:0.029260, cdsd:0.001282, mean:0.014784, ml:0.001435} },
+  '828': { Neval:5440,  Ninf:29245, exp:'6.4\u00d7',  mae:{ames:0.039465, cdsd:0.002224, mean:0.019327, ml:0.002749} },
+  '838': { Neval:1057,  Ninf:26988, exp:'26.5\u00d7', mae:{ames:0.043829, cdsd:0.001152, mean:0.021997, ml:0.001510} }
+};
+var ISO_ORDER = ['626','627','628','636','637','638','727','728','737','738','828','838'];
+
+// Feature definitions — ordering MUST match the trained model's feature_names
+var FEATURE_NAMES = ['J','v1','v2','v3','r','p','theory_diff','theory_diff_abs'];
+var FEATURE_DEFS = {
+  J:  { sym:'J', group:'q', desc:'Rotational quantum number \u2014 rotational excitation.' },
+  v1: { sym:'v\u2081', group:'q', desc:'Symmetric-stretch excitation.', mode:'v1' },
+  v2: { sym:'v\u2082', group:'q', desc:'Bending-mode excitation.', mode:'v2' },
+  v3: { sym:'v\u2083', group:'q', desc:'Asymmetric-stretch excitation.', mode:'v3' },
+  r:  { sym:'r', group:'q', desc:'Fermi-ranking index \u2014 distinguishes states within the rovibrational structure.' },
+  p:  { sym:'p', group:'q', desc:'Rotationless parity, encoded numerically.' },
+  theory_diff:     { sym:'\u0394E<sub>cal</sub>', group:'d', desc:'Signed disagreement between CDSD-296 and Ames-2021.' },
+  theory_diff_abs: { sym:'|\u0394E<sub>cal</sub>|', group:'d', desc:'Magnitude of the disagreement between the two calculated descriptions.' }
+};
+function featSym(i){ return FEATURE_DEFS[FEATURE_NAMES[i]].sym; }
+// Plain-text feature symbols for use INSIDE SVG <text> content only.
+// The HTML sym strings above contain a real <sub> tag, which is fine inside
+// normal HTML but is one of the handful of tags that force an HTML5 parser
+// to break out of an SVG foreign-content context mid-innerHTML -- so it can
+// never be reused for text built into SVG markup. Kept as a separate table
+// rather than stripped at render time, so this can't regress silently.
+var SVG_FEAT_SYM = ['J', 'v1', 'v2', 'v3', 'r', 'p', '\u0394E_cal', '|\u0394E_cal|'];
+function featSymSVG(i){ return SVG_FEAT_SYM[i]; }
+
+// Model metadata (manuscript Table: LightGBM hyperparameters)
+var MODEL_META = [
+  ['Objective', 'Huber (\u03b1 = 0.90)'], ['Learning rate', '0.01'], ['Max tree depth', '3'],
+  ['Num leaves', '31'], ['Min samples per leaf', '80'], ['Row subsampling', '0.80'],
+  ['Feature subsampling', '0.70'], ['L1 regularisation', '0.10'], ['L2 regularisation', '0.00'],
+  ['Max estimators', '6000'], ['Early stopping', '200 rounds'], ['Train/validation split', '80% / 20%']
+];
+
+// Per-fold journey data: real demo state, four ACTUAL trees extracted from
+// the exported fold model (indices, structures, genuine path, real leaf
+// contributions), remainder to the model's exact prediction, best iteration.
+var JOURNEY = {"626": {"nTrees": 850, "bestIter": 850, "state": {"J": 51, "v1": 5, "v2": 1, "v3": 0, "r": 2, "p": 0, "theory_diff": 0.016149, "theory_diff_abs": 0.016149, "EAmes": 8649.080194, "ECDSD": 8649.096343, "Emean": 8649.0882685, "dPred": 0.0076974593166825, "EMarvel": 8649.095578, "errBase": 0.0073095000007015, "errML": 0.00038795931598100027}, "trees": [{"idx": 0, "nodes": {"0": {"f": 6, "t": 0.030777999999827447}, "1": {"f": 6, "t": 0.008022999999866444}, "3": {"f": 6, "t": -0.004896500000086234}, "7": {"leaf": 0.0098492459}, "8": {"leaf": 0.0099185823}, "4": {"f": 6, "t": 0.01938950000021578}, "9": {"leaf": 0.009976846}, "10": {"leaf": 0.0100287452}, "2": {"f": 6, "t": 0.05850600000030682}, "5": {"f": 6, "t": 0.04263850000052117}, "11": {"leaf": 0.0100846316}, "12": {"leaf": 0.0101478841}, "6": {"f": 6, "t": 0.07606499999974405}, "13": {"leaf": 0.0102293031}, "14": {"leaf": 0.0103499046}}, "path": [0, 1, 4, 9], "contrib": 0.009976846}, {"idx": 1, "nodes": {"0": {"f": 6, "t": 0.030777999999827447}, "1": {"f": 6, "t": 0.008022999999866444}, "3": {"f": 6, "t": -0.004896500000086234}, "7": {"leaf": -0.0001562525}, "8": {"leaf": -8.76094e-05}, "4": {"f": 6, "t": 0.01938950000021578}, "9": {"leaf": -2.99284e-05}, "10": {"leaf": 2.14519e-05}, "2": {"f": 6, "t": 0.05983099999957631}, "5": {"f": 7, "t": 0.04280799999924057}, "11": {"leaf": 7.71588e-05}, "12": {"leaf": 0.0001423391}, "6": {"f": 6, "t": 0.08518749999984722}, "13": {"leaf": 0.0002407867}, "14": {"leaf": 0.0003746082}}, "path": [0, 1, 4, 9], "contrib": -2.99284e-05}, {"idx": 50, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 0, "t": 43.50000000000001}, "3": {"f": 3, "t": 1.5000000000000002}, "7": {"leaf": -2.48694e-05}, "8": {"leaf": 6.633e-06}, "4": {"f": 0, "t": 58.50000000000001}, "9": {"leaf": 1.64693e-05}, "10": {"leaf": 4.95805e-05}, "2": {"f": 2, "t": 1.0000000180025095e-35}, "5": {"f": 0, "t": 48.50000000000001}, "11": {"leaf": 9.60963e-05}, "12": {"leaf": 0.0001893566}, "6": {"f": 1, "t": 1.0000000180025095e-35}, "13": {"leaf": -2.99636e-05}, "14": {"leaf": 9.22951e-05}}, "path": [0, 1, 4, 9], "contrib": 1.64693e-05}, {"idx": 170, "nodes": {"0": {"f": 7, "t": 0.031010999999807613}, "1": {"f": 7, "t": 0.015951999999742842}, "3": {"f": 7, "t": 0.009845499999983078}, "7": {"leaf": -1.71304e-05}, "8": {"leaf": -9.6642e-06}, "4": {"f": 1, "t": 4.500000000000001}, "9": {"leaf": 1.7923e-06}, "10": {"leaf": -2.26304e-05}, "2": {"f": 7, "t": 0.06892800000059653}, "5": {"f": 7, "t": 0.049837999999908796}, "11": {"leaf": 1.5638e-05}, "12": {"leaf": 3.39319e-05}, "6": {"f": 1, "t": 3.5000000000000004}, "13": {"leaf": 7.16819e-05}, "14": {"leaf": -1.3866e-06}}, "path": [0, 1, 4, 10], "contrib": -2.26304e-05}, {"idx": 297, "nodes": {"0": {"f": 6, "t": 0.01938950000021578}, "1": {"f": 6, "t": -0.009260499999982129}, "3": {"f": 1, "t": 3.5000000000000004}, "7": {"leaf": -1.14705e-05}, "8": {"leaf": -2.94235e-05}, "4": {"f": 6, "t": 0.0028025000000013738}, "9": {"leaf": -6.9748e-06}, "10": {"leaf": -1.5451e-06}, "2": {"f": 7, "t": 0.06892800000059653}, "5": {"f": 7, "t": 0.042271499999969826}, "11": {"leaf": 2.6993e-06}, "12": {"leaf": 8.9968e-06}, "6": {"f": 1, "t": 3.5000000000000004}, "13": {"leaf": 2.56387e-05}, "14": {"leaf": -1.49783e-05}}, "path": [0, 1, 4, 10], "contrib": -1.5451e-06}, {"idx": 425, "nodes": {"0": {"f": 6, "t": 0.004179000000021916}, "1": {"f": 1, "t": 4.500000000000001}, "3": {"f": 0, "t": 41.50000000000001}, "7": {"leaf": -1.9259e-06}, "8": {"leaf": -7.0572e-06}, "4": {"f": 6, "t": -0.02793750000046202}, "9": {"leaf": -4.62906e-05}, "10": {"leaf": -1.1204e-06}, "2": {"f": 6, "t": 0.07089200000018538}, "5": {"f": 5, "t": 1.0000000180025095e-35}, "11": {"leaf": 1.3101e-06}, "12": {"leaf": -9.481e-07}, "6": {"f": 1, "t": 3.5000000000000004}, "13": {"leaf": 1.23475e-05}, "14": {"leaf": -2.14998e-05}}, "path": [0, 2, 5, 11], "contrib": 1.3101e-06}, {"idx": 552, "nodes": {"0": {"f": 2, "t": 2.5000000000000004}, "1": {"f": 6, "t": -0.002724500000567786}, "3": {"f": 7, "t": 0.031010999999807613}, "7": {"leaf": -2.2865e-06}, "8": {"leaf": -2.2082e-05}, "4": {"f": 3, "t": 1.0000000180025095e-35}, "9": {"leaf": -1.161e-06}, "10": {"leaf": 5.587e-07}, "2": {"f": 7, "t": 0.028676499999846786}, "5": {"f": 1, "t": 1.5000000000000002}, "11": {"leaf": 2.1929e-06}, "12": {"leaf": -2.8198e-06}, "6": {"leaf": 1.75952e-05}}, "path": [0, 1, 4, 9], "contrib": -1.161e-06}, {"idx": 680, "nodes": {"0": {"f": 2, "t": 2.5000000000000004}, "1": {"f": 6, "t": -0.002724500000567786}, "3": {"f": 6, "t": -0.01758749999953579}, "7": {"leaf": -5.3318e-06}, "8": {"leaf": -1.0885e-06}, "4": {"f": 0, "t": 99.50000000000001}, "9": {"leaf": 1.412e-07}, "10": {"leaf": -1.1185e-05}, "2": {"f": 1, "t": 1.5000000000000002}, "5": {"f": 1, "t": 1.0000000180025095e-35}, "11": {"leaf": 2.989e-07}, "12": {"leaf": 9.9078e-06}, "6": {"leaf": 0}}, "path": [0, 1, 4, 9], "contrib": 1.412e-07}], "remainder": -0.0022420424}, "627": {"nTrees": 2717, "bestIter": 2717, "state": {"J": 46, "v1": 2, "v2": 0, "v3": 1, "r": 1, "p": 0, "theory_diff": 0.00744, "theory_diff_abs": 0.00744, "EAmes": 5881.97609, "ECDSD": 5881.98353, "Emean": 5881.979810000001, "dPred": 0.0039872646810916, "EMarvel": 5881.983448, "errBase": 0.0036379999992277, "errML": 0.0003492646818638997}, "trees": [{"idx": 0, "nodes": {"0": {"f": 7, "t": 0.03156050000052347}, "1": {"f": 7, "t": 0.013021499999922527}, "3": {"f": 7, "t": 0.00840150000067297}, "7": {"leaf": 0.0091270324}, "8": {"leaf": 0.0091546833}, "4": {"f": 7, "t": 0.02243000000044049}, "9": {"leaf": 0.0091915042}, "10": {"leaf": 0.0092373565}, "2": {"f": 7, "t": 0.05466849999947954}, "5": {"f": 1, "t": 4.500000000000001}, "11": {"leaf": 0.0093199963}, "12": {"leaf": 0.0090895107}, "6": {"f": 7, "t": 0.07666550000021745}, "13": {"leaf": 0.0094251208}, "14": {"leaf": 0.0095507257}}, "path": [0, 1, 3, 7], "contrib": 0.0091270324}, {"idx": 1, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 0, "t": 42.50000000000001}, "3": {"f": 3, "t": 1.5000000000000002}, "7": {"leaf": -4.0891e-05}, "8": {"leaf": 1.43463e-05}, "4": {"f": 2, "t": 1.5000000000000002}, "9": {"leaf": 4.33782e-05}, "10": {"leaf": -2.5187e-05}, "2": {"f": 1, "t": 1.0000000180025095e-35}, "5": {"f": 2, "t": 1.0000000180025095e-35}, "11": {"leaf": 0.0001665617}, "12": {"leaf": -4.39476e-05}, "6": {"f": 3, "t": 4.500000000000001}, "13": {"leaf": 0.0001321214}, "14": {"leaf": 0.0002945991}}, "path": [0, 1, 4, 9], "contrib": 4.33782e-05}, {"idx": 2, "nodes": {"0": {"f": 6, "t": 0.025949999999738797}, "1": {"f": 6, "t": 0.004192499999930988}, "3": {"f": 6, "t": -0.01548800000000483}, "7": {"leaf": -0.0002192321}, "8": {"leaf": -0.0001066245}, "4": {"f": 6, "t": 0.012973500000043716}, "9": {"leaf": -4.55195e-05}, "10": {"leaf": 2.036e-06}, "2": {"f": 6, "t": 0.058582999999998726}, "5": {"f": 6, "t": 0.04107649999991737}, "11": {"leaf": 6.88138e-05}, "12": {"leaf": 0.0001423381}, "6": {"f": 6, "t": 0.08672849999993561}, "13": {"leaf": 0.0002427613}, "14": {"leaf": 0.0003862666}}, "path": [0, 1, 4, 9], "contrib": -4.55195e-05}, {"idx": 543, "nodes": {"0": {"f": 6, "t": -0.002686499999981606}, "1": {"f": 2, "t": 1.0000000180025095e-35}, "3": {"f": 6, "t": -0.030154000000038646}, "7": {"leaf": -2.958e-05}, "8": {"leaf": -3.9261e-06}, "4": {"f": 3, "t": 1.0000000180025095e-35}, "9": {"leaf": -1.16989e-05}, "10": {"leaf": 0}, "2": {"f": 5, "t": 1.0000000180025095e-35}, "5": {"f": 6, "t": 0.05732199999965815}, "11": {"leaf": 5.862e-07}, "12": {"leaf": 5.7242e-06}, "6": {"f": 3, "t": 1.5000000000000002}, "13": {"leaf": -2.0755e-06}, "14": {"leaf": 1.7533e-06}}, "path": [0, 2, 5, 11], "contrib": 5.862e-07}, {"idx": 950, "nodes": {"0": {"f": 0, "t": 103.50000000000001}, "1": {"f": 7, "t": 0.11057499999969879}, "3": {"f": 6, "t": -0.022167500000705328}, "7": {"leaf": -3.6694e-06}, "8": {"leaf": 2.62e-08}, "4": {"leaf": 1.1636e-05}, "2": {"leaf": -6.4381e-06}}, "path": [0, 1, 3, 8], "contrib": 2.62e-08}, {"idx": 1358, "nodes": {"0": {"f": 4, "t": 2.5000000000000004}, "1": {"f": 3, "t": 3.5000000000000004}, "3": {"f": 7, "t": 0.09878800000024059}, "7": {"leaf": -2.88e-08}, "8": {"leaf": 7.2618e-06}, "4": {"f": 6, "t": 0.09861150000051568}, "9": {"leaf": -9.14e-08}, "10": {"leaf": -1.33688e-05}, "2": {"f": 3, "t": 2.5000000000000004}, "5": {"f": 7, "t": 0.08285500000056346}, "11": {"leaf": 2.463e-07}, "12": {"leaf": -1.1577e-05}, "6": {"f": 6, "t": 0.06244000000015149}, "13": {"leaf": 0}, "14": {"leaf": 8.6032e-06}}, "path": [0, 1, 3, 7], "contrib": -2.88e-08}, {"idx": 1766, "nodes": {"0": {"f": 1, "t": 1.5000000000000002}, "1": {"f": 6, "t": 0.0328150000000278}, "3": {"f": 0, "t": 33.50000000000001}, "7": {"leaf": -6.761e-07}, "8": {"leaf": 7.231e-07}, "4": {"f": 3, "t": 1.0000000180025095e-35}, "9": {"leaf": -3.8037e-06}, "10": {"leaf": 1.4143e-06}, "2": {"f": 3, "t": 2.5000000000000004}, "5": {"f": 6, "t": 0.035237999999253596}, "11": {"leaf": 2.963e-07}, "12": {"leaf": -1.3009e-06}, "6": {"f": 1, "t": 2.5000000000000004}, "13": {"leaf": 0}, "14": {"leaf": -1.88567e-05}}, "path": [0, 2, 5, 11], "contrib": 2.963e-07}, {"idx": 2173, "nodes": {"0": {"f": 0, "t": 103.50000000000001}, "1": {"f": 7, "t": 0.11057499999969879}, "3": {"f": 6, "t": -0.030154000000038646}, "7": {"leaf": -2.6679e-06}, "8": {"leaf": 1.2e-09}, "4": {"leaf": 7.1743e-06}, "2": {"leaf": -1.02e-06}}, "path": [0, 1, 3, 8], "contrib": 1.2e-09}], "remainder": -0.0051385074}, "628": {"nTrees": 1656, "bestIter": 1656, "state": {"J": 58, "v1": 3, "v2": 0, "v3": 1, "r": 3, "p": 0, "theory_diff": 0.035036, "theory_diff_abs": 0.035036, "EAmes": 7373.547871, "ECDSD": 7373.582907, "Emean": 7373.565388999999, "dPred": 0.01801027256366, "EMarvel": 7373.58295, "errBase": 0.017561000000569, "errML": 0.00044927256309100147}, "trees": [{"idx": 0, "nodes": {"0": {"f": 6, "t": 0.02758200000005218}, "1": {"f": 6, "t": 0.004376500000148554}, "3": {"f": 7, "t": 0.011462999999935166}, "7": {"leaf": 0.0083962346}, "8": {"leaf": 0.0083013588}, "4": {"f": 6, "t": 0.012509000000079597}, "9": {"leaf": 0.0084505628}, "10": {"leaf": 0.008501143}, "2": {"f": 7, "t": 0.0559120000002622}, "5": {"f": 6, "t": 0.04088850000016465}, "11": {"leaf": 0.0085718606}, "12": {"leaf": 0.0086390032}, "6": {"f": 6, "t": 0.07683349999979329}, "13": {"leaf": 0.0087242986}, "14": {"leaf": 0.0088579138}}, "path": [0, 2, 5, 11], "contrib": 0.0085718606}, {"idx": 1, "nodes": {"0": {"f": 7, "t": 0.03501749999986715}, "1": {"f": 7, "t": 0.012404500000002374}, "3": {"f": 7, "t": 0.00832200000058947}, "7": {"leaf": -8.09369e-05}, "8": {"leaf": -5.66898e-05}, "4": {"f": 1, "t": 3.5000000000000004}, "9": {"leaf": 8.0135e-06}, "10": {"leaf": -6.91485e-05}, "2": {"f": 7, "t": 0.0559120000002622}, "5": {"f": 1, "t": 4.500000000000001}, "11": {"leaf": 0.000123722}, "12": {"leaf": -0.0001752052}, "6": {"f": 7, "t": 0.07734049999953642}, "13": {"leaf": 0.0002229367}, "14": {"leaf": 0.0003483034}}, "path": [0, 2, 5, 11], "contrib": 0.000123722}, {"idx": 4, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 0, "t": 40.50000000000001}, "3": {"f": 3, "t": 1.5000000000000002}, "7": {"leaf": -3.78281e-05}, "8": {"leaf": 9.8333e-06}, "4": {"f": 2, "t": 1.5000000000000002}, "9": {"leaf": 2.93252e-05}, "10": {"leaf": -3.41081e-05}, "2": {"f": 4, "t": 1.5000000000000002}, "5": {"f": 2, "t": 1.0000000180025095e-35}, "11": {"leaf": 0.0001289768}, "12": {"leaf": 5.1368e-06}, "6": {"f": 3, "t": 4.500000000000001}, "13": {"leaf": 0.0001656216}, "14": {"leaf": 0.0003396297}}, "path": [0, 1, 4, 9], "contrib": 2.93252e-05}, {"idx": 331, "nodes": {"0": {"f": 6, "t": 0.0029914999998368334}, "1": {"f": 6, "t": -0.020001500000034863}, "3": {"f": 4, "t": 4.500000000000001}, "7": {"leaf": -2.09669e-05}, "8": {"leaf": -4.64822e-05}, "4": {"f": 6, "t": -0.007488499999908526}, "9": {"leaf": -1.10841e-05}, "10": {"leaf": -4.6989e-06}, "2": {"f": 6, "t": 0.04596349999997074}, "5": {"f": 6, "t": 0.017790500000046453}, "11": {"leaf": -3.862e-07}, "12": {"leaf": 3.5883e-06}, "6": {"f": 5, "t": 1.0000000180025095e-35}, "13": {"leaf": 1.55552e-05}, "14": {"leaf": 0}}, "path": [0, 2, 5, 12], "contrib": 3.5883e-06}, {"idx": 579, "nodes": {"0": {"f": 6, "t": 0.022776499999508818}, "1": {"f": 6, "t": -0.011762500000259022}, "3": {"f": 0, "t": 33.50000000000001}, "7": {"leaf": -5.9078e-06}, "8": {"leaf": 0}, "4": {"f": 0, "t": 56.50000000000001}, "9": {"leaf": 0}, "10": {"leaf": -3.6907e-06}, "2": {"f": 2, "t": 1.5000000000000002}, "5": {"f": 0, "t": 55.50000000000001}, "11": {"leaf": 1.3596e-06}, "12": {"leaf": 7.1044e-06}, "6": {"f": 0, "t": 45.50000000000001}, "13": {"leaf": 0}, "14": {"leaf": -2.56209e-05}}, "path": [0, 2, 5, 12], "contrib": 7.1044e-06}, {"idx": 828, "nodes": {"0": {"f": 2, "t": 2.5000000000000004}, "1": {"f": 4, "t": 2.5000000000000004}, "3": {"f": 3, "t": 4.500000000000001}, "7": {"leaf": -1.899e-07}, "8": {"leaf": -6.0697e-06}, "4": {"f": 6, "t": 0.06605599999966218}, "9": {"leaf": 3.594e-07}, "10": {"leaf": 5.3081e-06}, "2": {"f": 6, "t": 0.032680000000254956}, "5": {"f": 1, "t": 1.0000000180025095e-35}, "11": {"leaf": 1.5248e-06}, "12": {"leaf": -6.062e-07}, "6": {"f": 1, "t": 1.0000000180025095e-35}, "13": {"leaf": 0}, "14": {"leaf": 1.07638e-05}}, "path": [0, 1, 4, 9], "contrib": 3.594e-07}, {"idx": 1076, "nodes": {"0": {"f": 3, "t": 1.0000000180025095e-35}, "1": {"f": 6, "t": 0.02606249999962529}, "3": {"f": 6, "t": 0.0022745000005670595}, "7": {"leaf": -1.7329e-06}, "8": {"leaf": 6.366e-07}, "4": {"f": 1, "t": 3.5000000000000004}, "9": {"leaf": 0}, "10": {"leaf": -2.60035e-05}, "2": {"f": 6, "t": 0.11240900000029798}, "5": {"f": 1, "t": 1.5000000000000002}, "11": {"leaf": 5.309e-07}, "12": {"leaf": -3.385e-07}, "6": {"leaf": 8.3094e-06}}, "path": [0, 2, 5, 12], "contrib": -3.385e-07}, {"idx": 1324, "nodes": {"0": {"f": 0, "t": 34.50000000000001}, "1": {"f": 7, "t": 0.08287650000056603}, "3": {"f": 0, "t": 32.50000000000001}, "7": {"leaf": 0}, "8": {"leaf": 4.3241e-06}, "4": {"f": 0, "t": 24.500000000000004}, "9": {"leaf": -1.6079e-05}, "10": {"leaf": 0}, "2": {"f": 3, "t": 1.5000000000000002}, "5": {"f": 5, "t": 1.0000000180025095e-35}, "11": {"leaf": 0}, "12": {"leaf": -2.6878e-06}, "6": {"f": 7, "t": 0.09936149999975898}, "13": {"leaf": 0}, "14": {"leaf": 1.46912e-05}}, "path": [0, 2, 5, 11], "contrib": 0}], "remainder": 0.0092746511}, "636": {"nTrees": 2214, "bestIter": 2214, "state": {"J": 7, "v1": 4, "v2": 2, "v3": 1, "r": 4, "p": 0, "theory_diff": -0.015766, "theory_diff_abs": 0.015766, "EAmes": 8574.271512, "ECDSD": 8574.255746, "Emean": 8574.263629000001, "dPred": -0.0083007422386435, "EMarvel": 8574.254446, "errBase": 0.0091830000001209, "errML": 0.0008822577614773994}, "trees": [{"idx": 0, "nodes": {"0": {"f": 6, "t": 0.027418500000294447}, "1": {"f": 6, "t": 0.006088500000032583}, "3": {"f": 7, "t": 0.00854849999996077}, "7": {"leaf": 0.0094603413}, "8": {"leaf": 0.0093680122}, "4": {"f": 7, "t": 0.01579100000003564}, "9": {"leaf": 0.0095158846}, "10": {"leaf": 0.0095635178}, "2": {"f": 6, "t": 0.05766999999968903}, "5": {"f": 6, "t": 0.04081949999977042}, "11": {"leaf": 0.0096236398}, "12": {"leaf": 0.009691801}, "6": {"f": 7, "t": 0.08662050000111778}, "13": {"leaf": 0.0097935018}, "14": {"leaf": 0.0099416853}}, "path": [0, 1, 3, 8], "contrib": 0.0093680122}, {"idx": 1, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 0, "t": 44.50000000000001}, "3": {"f": 3, "t": 1.5000000000000002}, "7": {"leaf": -3.73165e-05}, "8": {"leaf": 1.19088e-05}, "4": {"f": 0, "t": 64.50000000000001}, "9": {"leaf": 3.26638e-05}, "10": {"leaf": 9.47976e-05}, "2": {"f": 2, "t": 1.0000000180025095e-35}, "5": {"f": 0, "t": 48.50000000000001}, "11": {"leaf": 0.0001386016}, "12": {"leaf": 0.0002546403}, "6": {"f": 1, "t": 1.0000000180025095e-35}, "13": {"leaf": -5.44764e-05}, "14": {"leaf": 0.0001320211}}, "path": [0, 1, 3, 7], "contrib": -3.73165e-05}, {"idx": 2, "nodes": {"0": {"f": 6, "t": 0.027418500000294447}, "1": {"f": 6, "t": 0.005591999999978726}, "3": {"f": 6, "t": -0.010999999999967256}, "7": {"leaf": -0.0001951463}, "8": {"leaf": -9.66189e-05}, "4": {"f": 6, "t": 0.012465499999905207}, "9": {"leaf": -4.8229e-05}, "10": {"leaf": 1.431e-06}, "2": {"f": 6, "t": 0.05887900000016089}, "5": {"f": 6, "t": 0.04081949999977042}, "11": {"leaf": 6.84307e-05}, "12": {"leaf": 0.0001378474}, "6": {"f": 6, "t": 0.0756360000004861}, "13": {"leaf": 0.0002218227}, "14": {"leaf": 0.0003433015}}, "path": [0, 1, 3, 7], "contrib": -0.0001951463}, {"idx": 442, "nodes": {"0": {"f": 6, "t": -0.007310000000416038}, "1": {"f": 4, "t": 3.5000000000000004}, "3": {"f": 4, "t": 1.5000000000000002}, "7": {"leaf": -8.6702e-06}, "8": {"leaf": 0}, "4": {"f": 6, "t": -0.03595000000041181}, "9": {"leaf": -5.28678e-05}, "10": {"leaf": -6.5064e-06}, "2": {"f": 6, "t": 0.05766999999968903}, "5": {"f": 6, "t": 0.009840500000336762}, "11": {"leaf": -1.5698e-06}, "12": {"leaf": 9.861e-07}, "6": {"f": 2, "t": 1.5000000000000002}, "13": {"leaf": 8.9323e-06}, "14": {"leaf": -1.04463e-05}}, "path": [0, 1, 4, 10], "contrib": -6.5064e-06}, {"idx": 774, "nodes": {"0": {"f": 3, "t": 3.5000000000000004}, "1": {"f": 6, "t": 0.06315300000005665}, "3": {"f": 3, "t": 2.5000000000000004}, "7": {"leaf": 1.491e-07}, "8": {"leaf": -2.0481e-06}, "4": {"f": 1, "t": 3.5000000000000004}, "9": {"leaf": 4.3131e-06}, "10": {"leaf": -1.13421e-05}, "2": {"f": 1, "t": 1.0000000180025095e-35}, "5": {"leaf": -1.00893e-05}, "6": {"f": 0, "t": 27.500000000000004}, "13": {"leaf": -1.003e-06}, "14": {"leaf": 3.946e-07}}, "path": [0, 1, 3, 7], "contrib": 1.491e-07}, {"idx": 1107, "nodes": {"0": {"f": 4, "t": 2.5000000000000004}, "1": {"f": 3, "t": 4.500000000000001}, "3": {"f": 7, "t": 0.08230349999985266}, "7": {"leaf": -1.336e-07}, "8": {"leaf": 6.3795e-06}, "4": {"f": 6, "t": 0.08614499999976034}, "9": {"leaf": -3.615e-07}, "10": {"leaf": -1.66122e-05}, "2": {"f": 6, "t": 0.024947500000280346}, "5": {"f": 4, "t": 3.5000000000000004}, "11": {"leaf": 1.1267e-06}, "12": {"leaf": -3.1567e-06}, "6": {"f": 5, "t": 1.0000000180025095e-35}, "13": {"leaf": 4.2598e-06}, "14": {"leaf": -4.4572e-06}}, "path": [0, 2, 5, 12], "contrib": -3.1567e-06}, {"idx": 1439, "nodes": {"0": {"f": 0, "t": 33.50000000000001}, "1": {"f": 0, "t": 32.50000000000001}, "3": {"f": 1, "t": 2.5000000000000004}, "7": {"leaf": -4.953e-07}, "8": {"leaf": 7.743e-07}, "4": {"f": 6, "t": 0.012629000000060843}, "9": {"leaf": 2.64507e-05}, "10": {"leaf": -4.6222e-06}, "2": {"f": 1, "t": 3.5000000000000004}, "5": {"f": 4, "t": 3.5000000000000004}, "11": {"leaf": -1.547e-07}, "12": {"leaf": 5.1972e-06}, "6": {"f": 6, "t": 0.041968500000166394}, "13": {"leaf": 0}, "14": {"leaf": -9.1078e-06}}, "path": [0, 1, 3, 8], "contrib": 7.743e-07}, {"idx": 1771, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 7, "t": 0.06199250000008761}, "3": {"f": 7, "t": 0.04616599999917526}, "7": {"leaf": 0}, "8": {"leaf": 1.7019e-06}, "4": {"f": 0, "t": 46.50000000000001}, "9": {"leaf": -1.21082e-05}, "10": {"leaf": 0}, "2": {"f": 1, "t": 2.5000000000000004}, "5": {"f": 7, "t": 0.048518499999772764}, "11": {"leaf": -5.823e-07}, "12": {"leaf": 1.2478e-06}, "6": {"leaf": -1.15353e-05}}, "path": [0, 1, 3, 7], "contrib": 0}], "remainder": -0.017427552}, "637": {"nTrees": 1099, "bestIter": 1099, "state": {"J": 33, "v1": 1, "v2": 0, "v3": 2, "r": 2, "p": 0, "theory_diff": 0.034477, "theory_diff_abs": 0.034477, "EAmes": 6156.990248, "ECDSD": 6157.024725, "Emean": 6157.007486500001, "dPred": 0.0172470045439117, "EMarvel": 6157.024687, "errBase": 0.0172004999994896, "errML": 4.650454442210045e-05}, "trees": [{"idx": 0, "nodes": {"0": {"f": 6, "t": 0.025595000000294025}, "1": {"f": 6, "t": 0.004315500000075191}, "3": {"f": 6, "t": -0.01216000000022177}, "7": {"leaf": 0.0087246544}, "8": {"leaf": 0.0088225877}, "4": {"f": 6, "t": 0.012506500000199596}, "9": {"leaf": 0.0088791178}, "10": {"leaf": 0.0089274919}, "2": {"f": 6, "t": 0.057411000000684005}, "5": {"f": 7, "t": 0.039782499999546424}, "11": {"leaf": 0.008992689}, "12": {"leaf": 0.0090639374}, "6": {"f": 7, "t": 0.07595149999997376}, "13": {"leaf": 0.0091529888}, "14": {"leaf": 0.0092806537}}, "path": [0, 2, 5, 11], "contrib": 0.008992689}, {"idx": 1, "nodes": {"0": {"f": 7, "t": 0.031156000000009957}, "1": {"f": 7, "t": 0.012509499999850961}, "3": {"f": 7, "t": 0.00828550000028372}, "7": {"leaf": -8.37475e-05}, "8": {"leaf": -5.81355e-05}, "4": {"f": 7, "t": 0.022615999999970885}, "9": {"leaf": -2.0864e-05}, "10": {"leaf": 2.47022e-05}, "2": {"f": 7, "t": 0.05548800000019583}, "5": {"f": 1, "t": 4.500000000000001}, "11": {"leaf": 0.0001049379}, "12": {"leaf": -0.0001234437}, "6": {"f": 7, "t": 0.09100549999948272}, "13": {"leaf": 0.0002309858}, "14": {"leaf": 0.0003924832}}, "path": [0, 2, 5, 11], "contrib": 0.0001049379}, {"idx": 3, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 0, "t": 43.50000000000001}, "3": {"f": 3, "t": 1.5000000000000002}, "7": {"leaf": -3.72898e-05}, "8": {"leaf": 9.3522e-06}, "4": {"f": 2, "t": 1.5000000000000002}, "9": {"leaf": 4.19739e-05}, "10": {"leaf": -2.25112e-05}, "2": {"f": 1, "t": 1.0000000180025095e-35}, "5": {"f": 2, "t": 1.0000000180025095e-35}, "11": {"leaf": 0.0001587061}, "12": {"leaf": -4.64142e-05}, "6": {"f": 3, "t": 4.500000000000001}, "13": {"leaf": 0.0001260451}, "14": {"leaf": 0.000284135}}, "path": [0, 1, 3, 8], "contrib": 9.3522e-06}, {"idx": 219, "nodes": {"0": {"f": 6, "t": 0.010803500000236001}, "1": {"f": 7, "t": 0.012509499999850961}, "3": {"f": 6, "t": -0.0019789999996646652}, "7": {"leaf": -1.80471e-05}, "8": {"leaf": -6.407e-06}, "4": {"f": 7, "t": 0.049389000000246604}, "9": {"leaf": -4.17944e-05}, "10": {"leaf": -0.000113154}, "2": {"f": 7, "t": 0.04630350000002182}, "5": {"f": 7, "t": 0.024821499999234223}, "11": {"leaf": 1.6244e-06}, "12": {"leaf": 1.07906e-05}, "6": {"f": 7, "t": 0.11057499999969879}, "13": {"leaf": 2.811e-05}, "14": {"leaf": 9.69533e-05}}, "path": [0, 2, 5, 12], "contrib": 1.07906e-05}, {"idx": 384, "nodes": {"0": {"f": 6, "t": 0.012506500000199596}, "1": {"f": 6, "t": -0.011475500000074133}, "3": {"f": 4, "t": 3.5000000000000004}, "7": {"leaf": -7.8033e-06}, "8": {"leaf": -2.173e-05}, "4": {"f": 6, "t": -0.000691500000129963}, "9": {"leaf": -3.9948e-06}, "10": {"leaf": -1.1301e-06}, "2": {"f": 6, "t": 0.012715999999954876}, "5": {"leaf": 5.13506e-05}, "6": {"f": 6, "t": 0.08228549999967073}, "13": {"leaf": 1.8043e-06}, "14": {"leaf": 1.68239e-05}}, "path": [0, 2, 6, 13], "contrib": 1.8043e-06}, {"idx": 549, "nodes": {"0": {"f": 6, "t": 0.009717999999793394}, "1": {"f": 4, "t": 3.5000000000000004}, "3": {"f": 3, "t": 2.5000000000000004}, "7": {"leaf": -3.888e-07}, "8": {"leaf": -6.047e-06}, "4": {"f": 7, "t": 0.04499900000018898}, "9": {"leaf": -2.3143e-06}, "10": {"leaf": -4.33301e-05}, "2": {"f": 2, "t": 2.5000000000000004}, "5": {"f": 5, "t": 1.0000000180025095e-35}, "11": {"leaf": 1.325e-06}, "12": {"leaf": -1.2229e-06}, "6": {"f": 6, "t": 0.028630000000248405}, "13": {"leaf": 4.169e-07}, "14": {"leaf": 1.57108e-05}}, "path": [0, 2, 5, 11], "contrib": 1.325e-06}, {"idx": 714, "nodes": {"0": {"f": 2, "t": 3.5000000000000004}, "1": {"f": 4, "t": 1.5000000000000002}, "3": {"f": 7, "t": 0.032674500000212}, "7": {"leaf": -1.369e-06}, "8": {"leaf": 1.7085e-06}, "4": {"f": 7, "t": 0.11057499999969879}, "9": {"leaf": 3.251e-07}, "10": {"leaf": 2.21397e-05}, "2": {"f": 5, "t": 1.0000000180025095e-35}, "5": {"leaf": 0}, "6": {"leaf": 1.37971e-05}}, "path": [0, 1, 4, 9], "contrib": 3.251e-07}, {"idx": 879, "nodes": {"0": {"f": 0, "t": 103.50000000000001}, "1": {"f": 0, "t": 82.50000000000001}, "3": {"f": 4, "t": 1.5000000000000002}, "7": {"leaf": -5.098e-07}, "8": {"leaf": 3.571e-07}, "4": {"f": 7, "t": 0.006821999999829132}, "9": {"leaf": 0}, "10": {"leaf": 1.08033e-05}, "2": {"leaf": -7.7911e-06}}, "path": [0, 1, 3, 8], "contrib": 3.571e-07}], "remainder": 0.0081254233}, "638": {"nTrees": 1468, "bestIter": 1468, "state": {"J": 37, "v1": 3, "v2": 1, "v3": 1, "r": 4, "p": 0, "theory_diff": 0.016925, "theory_diff_abs": 0.016925, "EAmes": 6984.664607, "ECDSD": 6984.681532, "Emean": 6984.6730695, "dPred": 0.008600249353294, "EMarvel": 6984.681773, "errBase": 0.0087035000005926, "errML": 0.00010325064729859931}, "trees": [{"idx": 0, "nodes": {"0": {"f": 6, "t": 0.025442999999995667}, "1": {"f": 6, "t": 0.004363000000012108}, "3": {"f": 6, "t": -0.010402500000054713}, "7": {"leaf": 0.0083930561}, "8": {"leaf": 0.0084796494}, "4": {"f": 7, "t": 0.012552499999856083}, "9": {"leaf": 0.0085331697}, "10": {"leaf": 0.0085824086}, "2": {"f": 7, "t": 0.0575584999999137}, "5": {"f": 7, "t": 0.03955999999993765}, "11": {"leaf": 0.008646929}, "12": {"leaf": 0.0087186413}, "6": {"f": 6, "t": 0.0773945000000822}, "13": {"leaf": 0.0088105409}, "14": {"leaf": 0.008937831}}, "path": [0, 1, 4, 10], "contrib": 0.0085824086}, {"idx": 1, "nodes": {"0": {"f": 6, "t": 0.025442999999995667}, "1": {"f": 6, "t": 0.004363000000012108}, "3": {"f": 7, "t": 0.010181500000044254}, "7": {"leaf": -9.40483e-05}, "8": {"leaf": -0.0001789746}, "4": {"f": 7, "t": 0.012552499999856083}, "9": {"leaf": -4.13345e-05}, "10": {"leaf": 7.4119e-06}, "2": {"f": 7, "t": 0.0575584999999137}, "5": {"f": 7, "t": 0.03955999999993765}, "11": {"leaf": 7.12871e-05}, "12": {"leaf": 0.0001422824}, "6": {"f": 6, "t": 0.0773945000000822}, "13": {"leaf": 0.000233263}, "14": {"leaf": 0.0003592802}}, "path": [0, 1, 4, 10], "contrib": 7.4119e-06}, {"idx": 32, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 0, "t": 44.50000000000001}, "3": {"f": 1, "t": 4.500000000000001}, "7": {"leaf": -1.84819e-05}, "8": {"leaf": -8.51767e-05}, "4": {"f": 2, "t": 1.5000000000000002}, "9": {"leaf": 3.24656e-05}, "10": {"leaf": -1.48333e-05}, "2": {"f": 1, "t": 1.0000000180025095e-35}, "5": {"f": 2, "t": 1.0000000180025095e-35}, "11": {"leaf": 0.0001175786}, "12": {"leaf": -3.94745e-05}, "6": {"f": 3, "t": 4.500000000000001}, "13": {"leaf": 9.03107e-05}, "14": {"leaf": 0.0002142863}}, "path": [0, 1, 3, 7], "contrib": -1.84819e-05}, {"idx": 293, "nodes": {"0": {"f": 7, "t": 0.03802550000000338}, "1": {"f": 7, "t": 0.01583199999981844}, "3": {"f": 0, "t": 46.50000000000001}, "7": {"leaf": -3.4506e-06}, "8": {"leaf": -7.6859e-06}, "4": {"f": 1, "t": 4.500000000000001}, "9": {"leaf": 1.3136e-06}, "10": {"leaf": -6.2075e-06}, "2": {"f": 1, "t": 3.5000000000000004}, "5": {"f": 7, "t": 0.08554050000020653}, "11": {"leaf": 1.14487e-05}, "12": {"leaf": 4.38098e-05}, "6": {"f": 7, "t": 0.07151350000049207}, "13": {"leaf": -6.909e-07}, "14": {"leaf": -4.95128e-05}}, "path": [0, 1, 4, 9], "contrib": 1.3136e-06}, {"idx": 513, "nodes": {"0": {"f": 6, "t": -0.007212499999241117}, "1": {"f": 4, "t": 3.5000000000000004}, "3": {"f": 4, "t": 1.5000000000000002}, "7": {"leaf": -4.7235e-06}, "8": {"leaf": 0}, "4": {"f": 6, "t": -0.03901199999927484}, "9": {"leaf": -3.77438e-05}, "10": {"leaf": -4.4448e-06}, "2": {"f": 5, "t": 1.0000000180025095e-35}, "5": {"f": 6, "t": 0.05729249999967579}, "11": {"leaf": 5.622e-07}, "12": {"leaf": 6.8414e-06}, "6": {"f": 0, "t": 47.50000000000001}, "13": {"leaf": -8.19e-08}, "14": {"leaf": -5.8409e-06}}, "path": [0, 2, 5, 11], "contrib": 5.622e-07}, {"idx": 734, "nodes": {"0": {"f": 2, "t": 2.5000000000000004}, "1": {"f": 5, "t": 1.0000000180025095e-35}, "3": {"f": 0, "t": 32.50000000000001}, "7": {"leaf": -4.437e-07}, "8": {"leaf": 1.2473e-06}, "4": {"f": 0, "t": 67.50000000000001}, "9": {"leaf": -6.606e-07}, "10": {"leaf": -1.21133e-05}, "2": {"f": 6, "t": 0.028591999999889598}, "5": {"f": 0, "t": 53.50000000000001}, "11": {"leaf": -5.777e-07}, "12": {"leaf": 1.01464e-05}, "6": {"leaf": 1.01857e-05}}, "path": [0, 1, 3, 8], "contrib": 1.2473e-06}, {"idx": 954, "nodes": {"0": {"f": 6, "t": -0.00021749999950770868}, "1": {"f": 0, "t": 42.50000000000001}, "3": {"f": 0, "t": 35.50000000000001}, "7": {"leaf": -5.762e-07}, "8": {"leaf": 3.7573e-06}, "4": {"f": 1, "t": 1.0000000180025095e-35}, "9": {"leaf": 1.544e-06}, "10": {"leaf": -3.7733e-06}, "2": {"f": 0, "t": 52.50000000000001}, "5": {"f": 6, "t": 0.09018549999996141}, "11": {"leaf": 0}, "12": {"leaf": -8.2376e-06}, "6": {"f": 4, "t": 3.5000000000000004}, "13": {"leaf": 3.181e-07}, "14": {"leaf": 1.68378e-05}}, "path": [0, 2, 5, 11], "contrib": 0}, {"idx": 1174, "nodes": {"0": {"f": 6, "t": -0.00656749999961903}, "1": {"f": 4, "t": 3.5000000000000004}, "3": {"f": 7, "t": 0.03318299999955344}, "7": {"leaf": -1.377e-07}, "8": {"leaf": 9.0258e-06}, "4": {"f": 7, "t": 0.04410999999981869}, "9": {"leaf": -1.526e-07}, "10": {"leaf": -1.92994e-05}, "2": {"f": 0, "t": 33.50000000000001}, "5": {"f": 0, "t": 32.50000000000001}, "11": {"leaf": 3.84e-08}, "12": {"leaf": 7.8439e-06}, "6": {"f": 0, "t": 44.50000000000001}, "13": {"leaf": -1.2816e-06}, "14": {"leaf": 3.409e-07}}, "path": [0, 2, 6, 13], "contrib": -1.2816e-06}], "remainder": 2.70693e-05}, "727": {"nTrees": 959, "bestIter": 959, "state": {"J": 27, "v1": 0, "v2": 0, "v3": 2, "r": 1, "p": 0, "theory_diff": 0.045528, "theory_diff_abs": 0.045528, "EAmes": 4909.64035, "ECDSD": 4909.685878, "Emean": 4909.663114, "dPred": 0.0227948847631574, "EMarvel": 4909.686647, "errBase": 0.0235330000004978, "errML": 0.0007381152373404018}, "trees": [{"idx": 0, "nodes": {"0": {"f": 6, "t": 0.02565100000003895}, "1": {"f": 6, "t": 0.004305499999645691}, "3": {"f": 7, "t": 0.01028249999990294}, "7": {"leaf": 0.0087353637}, "8": {"leaf": 0.0086488196}, "4": {"f": 6, "t": 0.012538500000573551}, "9": {"leaf": 0.008788977}, "10": {"leaf": 0.0088377183}, "2": {"f": 7, "t": 0.055833499999607746}, "5": {"f": 6, "t": 0.03835949999938749}, "11": {"leaf": 0.0088999436}, "12": {"leaf": 0.0089685026}, "6": {"f": 7, "t": 0.07578250000051413}, "13": {"leaf": 0.009056933}, "14": {"leaf": 0.0091879266}}, "path": [0, 2, 5, 12], "contrib": 0.0089685026}, {"idx": 1, "nodes": {"0": {"f": 7, "t": 0.031031999999413532}, "1": {"f": 7, "t": 0.012455500000214672}, "3": {"f": 7, "t": 0.008320999999796188}, "7": {"leaf": -8.36501e-05}, "8": {"leaf": -5.86895e-05}, "4": {"f": 7, "t": 0.0222919999999931}, "9": {"leaf": -2.31299e-05}, "10": {"leaf": 2.3828e-05}, "2": {"f": 7, "t": 0.055833499999607746}, "5": {"f": 7, "t": 0.04166899999972885}, "11": {"leaf": 7.37293e-05}, "12": {"leaf": 0.0001292685}, "6": {"f": 7, "t": 0.07578250000051413}, "13": {"leaf": 0.000214136}, "14": {"leaf": 0.0003333145}}, "path": [0, 2, 5, 12], "contrib": 0.0001292685}, {"idx": 105, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 0, "t": 32.50000000000001}, "3": {"f": 1, "t": 5.500000000000001}, "7": {"leaf": -1.31906e-05}, "8": {"leaf": -0.0001580681}, "4": {"f": 1, "t": 4.500000000000001}, "9": {"leaf": 6.8662e-06}, "10": {"leaf": -4.33726e-05}, "2": {"f": 1, "t": 1.0000000180025095e-35}, "5": {"f": 2, "t": 1.0000000180025095e-35}, "11": {"leaf": 6.48865e-05}, "12": {"leaf": -2.14119e-05}, "6": {"f": 3, "t": 4.500000000000001}, "13": {"leaf": 4.83629e-05}, "14": {"leaf": 0.0001112483}}, "path": [0, 1, 3, 7], "contrib": -1.31906e-05}, {"idx": 191, "nodes": {"0": {"f": 7, "t": 0.03741500000023735}, "1": {"f": 7, "t": 0.017985999999950767}, "3": {"f": 7, "t": 0.009824999999864305}, "7": {"leaf": -1.27226e-05}, "8": {"leaf": -6.1223e-06}, "4": {"f": 1, "t": 4.500000000000001}, "9": {"leaf": 4.5109e-06}, "10": {"leaf": -1.76793e-05}, "2": {"f": 1, "t": 3.5000000000000004}, "5": {"f": 7, "t": 0.08608750000030342}, "11": {"leaf": 2.78344e-05}, "12": {"leaf": 9.01121e-05}, "6": {"f": 7, "t": 0.07865249999986192}, "13": {"leaf": 0}, "14": {"leaf": -7.78762e-05}}, "path": [0, 2, 5, 11], "contrib": 2.78344e-05}, {"idx": 335, "nodes": {"0": {"f": 7, "t": 0.04166899999972885}, "1": {"f": 7, "t": 0.015695500000219912}, "3": {"f": 2, "t": 1.5000000000000002}, "7": {"leaf": -3.7386e-06}, "8": {"leaf": -3.753e-07}, "4": {"f": 5, "t": 1.0000000180025095e-35}, "9": {"leaf": 1.4602e-06}, "10": {"leaf": -1.0107e-06}, "2": {"f": 1, "t": 3.5000000000000004}, "5": {"f": 7, "t": 0.08608750000030342}, "11": {"leaf": 8.5373e-06}, "12": {"leaf": 3.58734e-05}, "6": {"f": 7, "t": 0.07865249999986192}, "13": {"leaf": -1.6704e-06}, "14": {"leaf": -7.28357e-05}}, "path": [0, 2, 5, 11], "contrib": 8.5373e-06}, {"idx": 479, "nodes": {"0": {"f": 7, "t": 0.10958549999986646}, "1": {"f": 5, "t": 1.0000000180025095e-35}, "3": {"f": 7, "t": 0.029590999999982163}, "7": {"leaf": -4.015e-07}, "8": {"leaf": 3.0871e-06}, "4": {"f": 0, "t": 47.50000000000001}, "9": {"leaf": -6.207e-07}, "10": {"leaf": -7.4702e-06}, "2": {"leaf": 2.58354e-05}}, "path": [0, 1, 3, 8], "contrib": 3.0871e-06}, {"idx": 623, "nodes": {"0": {"f": 7, "t": 0.10958549999986646}, "1": {"f": 6, "t": -0.010970499999984893}, "3": {"f": 7, "t": 0.04854150000028313}, "7": {"leaf": -2.3473e-06}, "8": {"leaf": -1.92463e-05}, "4": {"f": 4, "t": 5.500000000000001}, "9": {"leaf": 3.73e-08}, "10": {"leaf": 1.70055e-05}, "2": {"leaf": 1.24643e-05}}, "path": [0, 1, 4, 9], "contrib": 3.73e-08}, {"idx": 767, "nodes": {"0": {"f": 3, "t": 1.0000000180025095e-35}, "1": {"f": 7, "t": 0.05797300000085671}, "3": {"f": 1, "t": 4.500000000000001}, "7": {"leaf": -8.671e-07}, "8": {"leaf": 4.8173e-06}, "4": {"f": 0, "t": 57.50000000000001}, "9": {"leaf": -5.60428e-05}, "10": {"leaf": 5.0716e-06}, "2": {"f": 0, "t": 31.500000000000004}, "5": {"f": 7, "t": 0.09065700000110156}, "11": {"leaf": -3.741e-07}, "12": {"leaf": -1.58395e-05}, "6": {"f": 0, "t": 35.50000000000001}, "13": {"leaf": 8.3088e-06}, "14": {"leaf": 0}}, "path": [0, 2, 5, 11], "contrib": -3.741e-07}], "remainder": 0.0136711823}, "728": {"nTrees": 1907, "bestIter": 1907, "state": {"J": 9, "v1": 1, "v2": 0, "v3": 2, "r": 1, "p": 0, "theory_diff": 0.015384, "theory_diff_abs": 0.015384, "EAmes": 5961.927265, "ECDSD": 5961.942649, "Emean": 5961.934957, "dPred": 0.0076470710495744, "EMarvel": 5961.943258, "errBase": 0.0083010000007561, "errML": 0.0006539289511816992}, "trees": [{"idx": 0, "nodes": {"0": {"f": 6, "t": 0.02559999999994034}, "1": {"f": 6, "t": 0.004241499999807275}, "3": {"f": 6, "t": -0.01216000000022177}, "7": {"leaf": 0.0083168037}, "8": {"leaf": 0.0084122785}, "4": {"f": 6, "t": 0.012428999999883674}, "9": {"leaf": 0.0084679412}, "10": {"leaf": 0.0085170892}, "2": {"f": 6, "t": 0.05758199999968384}, "5": {"f": 6, "t": 0.03941599999984647}, "11": {"leaf": 0.0085820189}, "12": {"leaf": 0.0086544257}, "6": {"f": 6, "t": 0.0758730000002288}, "13": {"leaf": 0.0087424359}, "14": {"leaf": 0.0088666786}}, "path": [0, 1, 4, 10], "contrib": 0.0085170892}, {"idx": 1, "nodes": {"0": {"f": 7, "t": 0.03120899999998983}, "1": {"f": 7, "t": 0.012538999999833324}, "3": {"f": 7, "t": 0.008352999999715395}, "7": {"leaf": -7.99133e-05}, "8": {"leaf": -5.50878e-05}, "4": {"f": 7, "t": 0.022518499999932832}, "9": {"leaf": -1.91098e-05}, "10": {"leaf": 2.68071e-05}, "2": {"f": 7, "t": 0.05569950000017344}, "5": {"f": 1, "t": 4.500000000000001}, "11": {"leaf": 0.0001111247}, "12": {"leaf": -0.0001255473}, "6": {"f": 7, "t": 0.07625949999965088}, "13": {"leaf": 0.0002178493}, "14": {"leaf": 0.0003362956}}, "path": [0, 1, 4, 9], "contrib": -1.91098e-05}, {"idx": 4, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 0, "t": 44.50000000000001}, "3": {"f": 3, "t": 1.5000000000000002}, "7": {"leaf": -3.79894e-05}, "8": {"leaf": 1.16334e-05}, "4": {"f": 1, "t": 1.0000000180025095e-35}, "9": {"leaf": 6.77409e-05}, "10": {"leaf": 1.69245e-05}, "2": {"f": 1, "t": 1.0000000180025095e-35}, "5": {"f": 2, "t": 1.0000000180025095e-35}, "11": {"leaf": 0.0001588773}, "12": {"leaf": -4.16173e-05}, "6": {"f": 3, "t": 4.500000000000001}, "13": {"leaf": 0.0001267671}, "14": {"leaf": 0.0002832074}}, "path": [0, 1, 3, 8], "contrib": 1.16334e-05}, {"idx": 381, "nodes": {"0": {"f": 7, "t": 0.10929399999986346}, "1": {"f": 7, "t": 0.02878749999945285}, "3": {"f": 2, "t": 1.5000000000000002}, "7": {"leaf": -2.3568e-06}, "8": {"leaf": 1.5978e-06}, "4": {"f": 1, "t": 1.5000000000000002}, "9": {"leaf": 7.2185e-06}, "10": {"leaf": -1.5121e-06}, "2": {"leaf": 4.00732e-05}}, "path": [0, 1, 3, 7], "contrib": -2.3568e-06}, {"idx": 667, "nodes": {"0": {"f": 6, "t": 0.015767499999583382}, "1": {"f": 2, "t": 1.5000000000000002}, "3": {"f": 6, "t": 0.012428999999883674}, "7": {"leaf": -6.178e-07}, "8": {"leaf": -4.8994e-06}, "4": {"f": 6, "t": 0.012428999999883674}, "9": {"leaf": -4.576e-07}, "10": {"leaf": 1.92888e-05}, "2": {"f": 4, "t": 4.500000000000001}, "5": {"f": 2, "t": 2.5000000000000004}, "11": {"leaf": 2.94e-08}, "12": {"leaf": 6.7579e-06}, "6": {"f": 2, "t": 1.0000000180025095e-35}, "13": {"leaf": 1.39764e-05}, "14": {"leaf": 0}}, "path": [0, 1, 3, 8], "contrib": -4.8994e-06}, {"idx": 953, "nodes": {"0": {"f": 0, "t": 36.50000000000001}, "1": {"f": 0, "t": 32.50000000000001}, "3": {"f": 7, "t": 0.09092600000076347}, "7": {"leaf": -7.65e-08}, "8": {"leaf": -1.52213e-05}, "4": {"f": 2, "t": 1.5000000000000002}, "9": {"leaf": 0}, "10": {"leaf": 2.01681e-05}, "2": {"f": 5, "t": 1.0000000180025095e-35}, "5": {"f": 7, "t": 0.05807099999947241}, "11": {"leaf": -4.217e-07}, "12": {"leaf": 4.1207e-06}, "6": {"f": 7, "t": 0.034272999999984684}, "13": {"leaf": 0}, "14": {"leaf": -9.437e-06}}, "path": [0, 1, 3, 7], "contrib": -7.65e-08}, {"idx": 1239, "nodes": {"0": {"f": 4, "t": 2.5000000000000004}, "1": {"f": 7, "t": 0.10929399999986346}, "3": {"f": 7, "t": 0.013135000000602306}, "7": {"leaf": 3.566e-07}, "8": {"leaf": -5.602e-07}, "4": {"leaf": -9.1822e-06}, "2": {"f": 3, "t": 2.5000000000000004}, "5": {"f": 7, "t": 0.07329849999950967}, "11": {"leaf": 4.73e-07}, "12": {"leaf": -9.3971e-06}, "6": {"f": 6, "t": 0.06170849999966777}, "13": {"leaf": 0}, "14": {"leaf": 1.00063e-05}}, "path": [0, 1, 3, 8], "contrib": -5.602e-07}, {"idx": 1525, "nodes": {"0": {"f": 3, "t": 1.0000000180025095e-35}, "1": {"f": 5, "t": 1.0000000180025095e-35}, "3": {"f": 6, "t": 0.007460999999693741}, "7": {"leaf": 1.6995e-06}, "8": {"leaf": -3.603e-07}, "4": {"f": 6, "t": 0.001201999999693726}, "9": {"leaf": -1.48937e-05}, "10": {"leaf": -1.46e-08}, "2": {"f": 0, "t": 19.500000000000004}, "5": {"f": 6, "t": 0.017845999999849486}, "11": {"leaf": -1.3241e-06}, "12": {"leaf": 1.2198e-06}, "6": {"f": 6, "t": 0.013159999999970752}, "13": {"leaf": 1.3304e-06}, "14": {"leaf": -2.18e-07}}, "path": [0, 2, 5, 11], "contrib": -1.3241e-06}], "remainder": -0.0008533247}, "737": {"nTrees": 1505, "bestIter": 1505, "state": {"J": 30, "v1": 3, "v2": 1, "v3": 1, "r": 4, "p": 0, "theory_diff": 0.018578, "theory_diff_abs": 0.018578, "EAmes": 6804.444904, "ECDSD": 6804.463482, "Emean": 6804.454193, "dPred": 0.0094832511356074, "EMarvel": 6804.459563, "errBase": 0.0053700000007665, "errML": 0.0041132511348409}, "trees": [{"idx": 0, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 0, "t": 43.50000000000001}, "3": {"f": 3, "t": 1.5000000000000002}, "7": {"leaf": 0.0087241685}, "8": {"leaf": 0.0087761742}, "4": {"f": 2, "t": 1.5000000000000002}, "9": {"leaf": 0.0088055034}, "10": {"leaf": 0.0087412772}, "2": {"f": 4, "t": 1.5000000000000002}, "5": {"f": 2, "t": 1.0000000180025095e-35}, "11": {"leaf": 0.0088928846}, "12": {"leaf": 0.0087622798}, "6": {"f": 3, "t": 4.500000000000001}, "13": {"leaf": 0.0089256466}, "14": {"leaf": 0.009097426}}, "path": [0, 1, 3, 7], "contrib": 0.0087241685}, {"idx": 1, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 0, "t": 43.50000000000001}, "3": {"f": 3, "t": 1.5000000000000002}, "7": {"leaf": -3.89258e-05}, "8": {"leaf": 1.25598e-05}, "4": {"f": 2, "t": 1.5000000000000002}, "9": {"leaf": 4.15957e-05}, "10": {"leaf": -2.19882e-05}, "2": {"f": 4, "t": 1.5000000000000002}, "5": {"f": 2, "t": 1.0000000180025095e-35}, "11": {"leaf": 0.0001281031}, "12": {"leaf": -1.1956e-06}, "6": {"f": 3, "t": 4.500000000000001}, "13": {"leaf": 0.0001605375}, "14": {"leaf": 0.0003305991}}, "path": [0, 1, 3, 7], "contrib": -3.89258e-05}, {"idx": 2, "nodes": {"0": {"f": 6, "t": 0.02573849999953382}, "1": {"f": 6, "t": 0.004416499999933877}, "3": {"f": 7, "t": 0.011754499999824477}, "7": {"leaf": -9.8194e-05}, "8": {"leaf": -0.0001930391}, "4": {"f": 6, "t": 0.012537000000065747}, "9": {"leaf": -4.24103e-05}, "10": {"leaf": 6.0674e-06}, "2": {"f": 6, "t": 0.05591450000019905}, "5": {"f": 7, "t": 0.03935849999925268}, "11": {"leaf": 6.97296e-05}, "12": {"leaf": 0.0001376062}, "6": {"f": 7, "t": 0.07541899999978342}, "13": {"leaf": 0.0002233144}, "14": {"leaf": 0.0003529561}}, "path": [0, 1, 4, 10], "contrib": 6.0674e-06}, {"idx": 301, "nodes": {"0": {"f": 6, "t": 0.00894949999974415}, "1": {"f": 6, "t": -0.010588999999527003}, "3": {"f": 6, "t": -0.021358999999392832}, "7": {"leaf": -3.76138e-05}, "8": {"leaf": -1.82737e-05}, "4": {"f": 6, "t": -1.0000000180025095e-35}, "9": {"leaf": -8.7414e-06}, "10": {"leaf": -3.0855e-06}, "2": {"f": 6, "t": 0.06756499999937661}, "5": {"f": 6, "t": 0.03279150000025766}, "11": {"leaf": 1.9133e-06}, "12": {"leaf": 8.4797e-06}, "6": {"f": 1, "t": 3.5000000000000004}, "13": {"leaf": 3.02259e-05}, "14": {"leaf": -9.863e-06}}, "path": [0, 2, 5, 11], "contrib": 1.9133e-06}, {"idx": 526, "nodes": {"0": {"f": 6, "t": 0.01552149999952235}, "1": {"f": 7, "t": 0.013062499999932699}, "3": {"f": 6, "t": 0.012537000000065747}, "7": {"leaf": -9.741e-07}, "8": {"leaf": 1.95807e-05}, "4": {"f": 6, "t": 0.01431549999995241}, "9": {"leaf": -6.495e-06}, "10": {"leaf": -2.104e-07}, "2": {"f": 2, "t": 2.5000000000000004}, "5": {"f": 4, "t": 4.500000000000001}, "11": {"leaf": 6.344e-07}, "12": {"leaf": 1.19511e-05}, "6": {"f": 7, "t": 0.02845550000029107}, "13": {"leaf": 1.3321e-06}, "14": {"leaf": 1.80279e-05}}, "path": [0, 2, 5, 11], "contrib": 6.344e-07}, {"idx": 752, "nodes": {"0": {"f": 3, "t": 3.5000000000000004}, "1": {"f": 7, "t": 0.0979575000001205}, "3": {"f": 6, "t": -0.006926000000021303}, "7": {"leaf": -1.8308e-06}, "8": {"leaf": 1.891e-07}, "4": {"leaf": 1.44155e-05}, "2": {"f": 2, "t": 1.0000000180025095e-35}, "5": {"f": 6, "t": 0.02407700000003388}, "11": {"leaf": -1.35782e-05}, "12": {"leaf": -2.4141e-06}, "6": {"f": 6, "t": -0.0039625000000569335}, "13": {"leaf": 0}, "14": {"leaf": 1.2921e-06}}, "path": [0, 1, 3, 8], "contrib": 1.891e-07}, {"idx": 978, "nodes": {"0": {"f": 6, "t": 0.04594950000046084}, "1": {"f": 3, "t": 2.5000000000000004}, "3": {"f": 4, "t": 1.5000000000000002}, "7": {"leaf": -6.04e-07}, "8": {"leaf": 6.676e-07}, "4": {"f": 1, "t": 1.5000000000000002}, "9": {"leaf": -9.46e-07}, "10": {"leaf": -1.70459e-05}, "2": {"f": 1, "t": 3.5000000000000004}, "5": {"f": 4, "t": 2.5000000000000004}, "11": {"leaf": 7.914e-07}, "12": {"leaf": 7.4926e-06}, "6": {"f": 4, "t": 3.5000000000000004}, "13": {"leaf": -3.96109e-05}, "14": {"leaf": 1.8271e-06}}, "path": [0, 1, 3, 8], "contrib": 6.676e-07}, {"idx": 1204, "nodes": {"0": {"f": 2, "t": 1.0000000180025095e-35}, "1": {"f": 6, "t": -0.02989700000034645}, "3": {"leaf": -1.4945e-05}, "4": {"f": 7, "t": 0.023787499999343712}, "9": {"leaf": -1.3544e-06}, "10": {"leaf": 1.3903e-06}, "2": {"f": 6, "t": -0.041173999999955406}, "5": {"leaf": 2.06526e-05}, "6": {"f": 7, "t": 0.013062499999932699}, "13": {"leaf": 6.922e-07}, "14": {"leaf": -4.608e-07}}, "path": [0, 2, 6, 14], "contrib": -4.608e-07}], "remainder": 0.0007889975}, "738": {"nTrees": 1026, "bestIter": 1026, "state": {"J": 36, "v1": 1, "v2": 1, "v3": 1, "r": 2, "p": 1, "theory_diff": 0.017955, "theory_diff_abs": 0.017955, "EAmes": 4552.112057, "ECDSD": 4552.130012, "Emean": 4552.1210345, "dPred": 0.0089548396282164, "EMarvel": 4552.12982, "errBase": 0.0087855000001582, "errML": 0.0001693396280582002}, "trees": [{"idx": 0, "nodes": {"0": {"f": 6, "t": 0.025781500000448435}, "1": {"f": 6, "t": 0.004376999999749388}, "3": {"f": 6, "t": -0.009293500000239872}, "7": {"leaf": 0.0085393}, "8": {"leaf": 0.0086239911}, "4": {"f": 6, "t": 0.012425500000517788}, "9": {"leaf": 0.008675988}, "10": {"leaf": 0.0087248129}, "2": {"f": 6, "t": 0.05537249999997585}, "5": {"f": 6, "t": 0.038511000000653446}, "11": {"leaf": 0.008788083}, "12": {"leaf": 0.0088545896}, "6": {"f": 6, "t": 0.07727150000027906}, "13": {"leaf": 0.008944468}, "14": {"leaf": 0.0090801637}}, "path": [0, 1, 4, 10], "contrib": 0.0087248129}, {"idx": 1, "nodes": {"0": {"f": 6, "t": 0.025781500000448435}, "1": {"f": 6, "t": 0.004176000000370551}, "3": {"f": 7, "t": 0.011805999999978669}, "7": {"leaf": -9.76272e-05}, "8": {"leaf": -0.0001922164}, "4": {"f": 6, "t": 0.012425500000517788}, "9": {"leaf": -4.27406e-05}, "10": {"leaf": 6.0395e-06}, "2": {"f": 7, "t": 0.05573800000001939}, "5": {"f": 7, "t": 0.038508000000092586}, "11": {"leaf": 6.86695e-05}, "12": {"leaf": 0.0001350602}, "6": {"f": 6, "t": 0.07727150000027906}, "13": {"leaf": 0.000224526}, "14": {"leaf": 0.0003578369}}, "path": [0, 1, 4, 10], "contrib": 6.0395e-06}, {"idx": 23, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 0, "t": 43.50000000000001}, "3": {"f": 3, "t": 1.5000000000000002}, "7": {"leaf": -3.11409e-05}, "8": {"leaf": 1.06993e-05}, "4": {"f": 2, "t": 1.5000000000000002}, "9": {"leaf": 3.49887e-05}, "10": {"leaf": -1.61861e-05}, "2": {"f": 1, "t": 1.0000000180025095e-35}, "5": {"f": 2, "t": 1.0000000180025095e-35}, "11": {"leaf": 0.0001251837}, "12": {"leaf": -4.11556e-05}, "6": {"f": 3, "t": 4.500000000000001}, "13": {"leaf": 0.0001026206}, "14": {"leaf": 0.0002359929}}, "path": [0, 1, 3, 7], "contrib": -3.11409e-05}, {"idx": 205, "nodes": {"0": {"f": 6, "t": 0.012425500000517788}, "1": {"f": 6, "t": -0.012311500000123486}, "3": {"f": 7, "t": 0.049788500000431675}, "7": {"leaf": -4.33605e-05}, "8": {"leaf": -0.0001186265}, "4": {"f": 6, "t": -0.00021749999950770868}, "9": {"leaf": -1.79363e-05}, "10": {"leaf": -6.0203e-06}, "2": {"f": 7, "t": 0.049006000000190404}, "5": {"f": 7, "t": 0.012568999999984955}, "11": {"leaf": 7.12193e-05}, "12": {"leaf": 6.8514e-06}, "6": {"f": 7, "t": 0.09751700000015263}, "13": {"leaf": 3.18666e-05}, "14": {"leaf": 8.1733e-05}}, "path": [0, 2, 5, 12], "contrib": 6.8514e-06}, {"idx": 359, "nodes": {"0": {"f": 6, "t": 1.0000000180025095e-35}, "1": {"f": 7, "t": 0.02017650000027516}, "3": {"f": 7, "t": 0.008523499999682828}, "7": {"leaf": -4.2865e-06}, "8": {"leaf": -9.3059e-06}, "4": {"f": 7, "t": 0.049788500000431675}, "9": {"leaf": -1.77407e-05}, "10": {"leaf": -4.60084e-05}, "2": {"f": 7, "t": 0.04070650000039678}, "5": {"f": 6, "t": 0.012425500000517788}, "11": {"leaf": -1.1759e-06}, "12": {"leaf": 1.7001e-06}, "6": {"f": 5, "t": 1.0000000180025095e-35}, "13": {"leaf": 1.06406e-05}, "14": {"leaf": -1.2749e-06}}, "path": [0, 2, 5, 12], "contrib": 1.7001e-06}, {"idx": 513, "nodes": {"0": {"f": 6, "t": 0.005411499999809167}, "1": {"f": 6, "t": -0.012311500000123486}, "3": {"f": 0, "t": 32.50000000000001}, "7": {"leaf": -8.8416e-06}, "8": {"leaf": 0}, "4": {"f": 0, "t": 36.50000000000001}, "9": {"leaf": -1.431e-07}, "10": {"leaf": -3.7934e-06}, "2": {"f": 0, "t": 57.50000000000001}, "5": {"f": 1, "t": 4.500000000000001}, "11": {"leaf": 1.867e-07}, "12": {"leaf": 7.8248e-06}, "6": {"f": 6, "t": 0.08442649999960851}, "13": {"leaf": 1.9951e-06}, "14": {"leaf": 2.64116e-05}}, "path": [0, 2, 5, 11], "contrib": 1.867e-07}, {"idx": 666, "nodes": {"0": {"f": 0, "t": 103.50000000000001}, "1": {"f": 6, "t": 0.06187449999970341}, "3": {"f": 2, "t": 1.5000000000000002}, "7": {"leaf": -5.928e-07}, "8": {"leaf": 1.3816e-06}, "4": {"f": 1, "t": 1.5000000000000002}, "9": {"leaf": 8.936e-06}, "10": {"leaf": -3.774e-06}, "2": {"leaf": -1.44559e-05}}, "path": [0, 1, 3, 7], "contrib": -5.928e-07}, {"idx": 820, "nodes": {"0": {"f": 4, "t": 1.5000000000000002}, "1": {"f": 6, "t": 0.03293800000028569}, "3": {"f": 3, "t": 4.500000000000001}, "7": {"leaf": -8.272e-07}, "8": {"leaf": -1.38451e-05}, "4": {"f": 1, "t": 1.5000000000000002}, "9": {"leaf": 3.1859e-06}, "10": {"leaf": -1.05435e-05}, "2": {"f": 1, "t": 1.5000000000000002}, "5": {"f": 2, "t": 1.5000000000000002}, "11": {"leaf": 0}, "12": {"leaf": 1.08886e-05}, "6": {"f": 4, "t": 2.5000000000000004}, "13": {"leaf": -2.0214e-06}, "14": {"leaf": 6.364e-07}}, "path": [0, 2, 5, 11], "contrib": 0}], "remainder": 0.0002469827}, "828": {"nTrees": 5110, "bestIter": 5110, "state": {"J": 71, "v1": 3, "v2": 0, "v3": 1, "r": 1, "p": 0, "theory_diff": 0.068521, "theory_diff_abs": 0.068521, "EAmes": 8125.828707, "ECDSD": 8125.897228, "Emean": 8125.862967499999, "dPred": 0.0315974772858359, "EMarvel": 8125.89561, "errBase": 0.0326425000002927, "errML": 0.001045022714456799}, "trees": [{"idx": 0, "nodes": {"0": {"f": 7, "t": 0.03102749999970911}, "1": {"f": 7, "t": 0.014314000000126727}, "3": {"f": 7, "t": 0.00834300000019539}, "7": {"leaf": 0.0074512899}, "8": {"leaf": 0.0074817496}, "4": {"f": 1, "t": 3.5000000000000004}, "9": {"leaf": 0.0075427287}, "10": {"leaf": 0.0074809939}, "2": {"f": 7, "t": 0.05433700000048703}, "5": {"f": 1, "t": 4.500000000000001}, "11": {"leaf": 0.0076402147}, "12": {"leaf": 0.0073596687}, "6": {"f": 1, "t": 3.5000000000000004}, "13": {"leaf": 0.0078039761}, "14": {"leaf": 0.0074276846}}, "path": [0, 2, 6, 13], "contrib": 0.0078039761}, {"idx": 1, "nodes": {"0": {"f": 6, "t": 0.02434649999986505}, "1": {"f": 6, "t": 0.0038804999999229044}, "3": {"f": 7, "t": 0.011291499999970258}, "7": {"leaf": -8.60586e-05}, "8": {"leaf": -0.0001755709}, "4": {"f": 7, "t": 0.013719999999466383}, "9": {"leaf": -2.83176e-05}, "10": {"leaf": 1.79229e-05}, "2": {"f": 6, "t": 0.05369100000007166}, "5": {"f": 6, "t": 0.038013999999975574}, "11": {"leaf": 7.75428e-05}, "12": {"leaf": 0.0001438604}, "6": {"f": 7, "t": 0.07325649999984309}, "13": {"leaf": 0.0002295783}, "14": {"leaf": 0.0003620745}}, "path": [0, 2, 6, 13], "contrib": 0.0002295783}, {"idx": 13, "nodes": {"0": {"f": 3, "t": 2.5000000000000004}, "1": {"f": 0, "t": 37.50000000000001}, "3": {"f": 1, "t": 4.500000000000001}, "7": {"leaf": -2.27732e-05}, "8": {"leaf": -0.0001072717}, "4": {"f": 1, "t": 1.0000000180025095e-35}, "9": {"leaf": 5.04981e-05}, "10": {"leaf": 0}, "2": {"f": 4, "t": 1.5000000000000002}, "5": {"f": 2, "t": 1.0000000180025095e-35}, "11": {"leaf": 0.0001128223}, "12": {"leaf": 1.3165e-06}, "6": {"f": 3, "t": 4.500000000000001}, "13": {"leaf": 0.0001443444}, "14": {"leaf": 0.0003112549}}, "path": [0, 1, 4, 10], "contrib": 0}, {"idx": 1022, "nodes": {"0": {"f": 4, "t": 4.500000000000001}, "1": {"f": 1, "t": 4.500000000000001}, "3": {"f": 2, "t": 1.0000000180025095e-35}, "7": {"leaf": -5.355e-07}, "8": {"leaf": 2.238e-07}, "4": {"f": 6, "t": -0.003244500000164407}, "9": {"leaf": 0}, "10": {"leaf": 6.5136e-06}, "2": {"f": 1, "t": 4.500000000000001}, "5": {"f": 6, "t": 0.013881499999570225}, "11": {"leaf": -4.77e-07}, "12": {"leaf": 4.87e-06}, "6": {"f": 0, "t": 32.50000000000001}, "13": {"leaf": 0}, "14": {"leaf": -2.07242e-05}}, "path": [0, 1, 3, 7], "contrib": -5.355e-07}, {"idx": 1788, "nodes": {"0": {"f": 2, "t": 1.0000000180025095e-35}, "1": {"f": 7, "t": 0.10605949999990118}, "3": {"f": 4, "t": 3.5000000000000004}, "7": {"leaf": -2.749e-07}, "8": {"leaf": 1.5872e-06}, "4": {"leaf": -1.00193e-05}, "2": {"f": 4, "t": 3.5000000000000004}, "5": {"f": 7, "t": 0.06940200000053666}, "11": {"leaf": 1.603e-07}, "12": {"leaf": 1.75202e-05}, "6": {"f": 1, "t": 3.5000000000000004}, "13": {"leaf": 1.267e-06}, "14": {"leaf": -4.981e-06}}, "path": [0, 1, 3, 7], "contrib": -2.749e-07}, {"idx": 2555, "nodes": {"0": {"f": 7, "t": 0.10605949999990118}, "1": {"f": 0, "t": 44.50000000000001}, "3": {"f": 7, "t": 0.08345550000012737}, "7": {"leaf": 0}, "8": {"leaf": -1.04583e-05}, "4": {"f": 4, "t": 3.5000000000000004}, "9": {"leaf": -1.404e-07}, "10": {"leaf": 5.5083e-06}, "2": {"leaf": 1.4044e-06}}, "path": [0, 1, 4, 9], "contrib": -1.404e-07}, {"idx": 3321, "nodes": {"0": {"f": 4, "t": 2.5000000000000004}, "1": {"f": 2, "t": 2.5000000000000004}, "3": {"f": 6, "t": -0.01578350000090722}, "7": {"leaf": -2.7589e-06}, "8": {"leaf": -2.67e-08}, "4": {"f": 6, "t": -0.009164499999769758}, "9": {"leaf": 6.4708e-06}, "10": {"leaf": 0}, "2": {"f": 7, "t": 0.02836949999982608}, "5": {"f": 0, "t": 37.50000000000001}, "11": {"leaf": 4.06e-08}, "12": {"leaf": -1.0257e-06}, "6": {"f": 2, "t": 1.0000000180025095e-35}, "13": {"leaf": 3.8336e-06}, "14": {"leaf": -4.45e-07}}, "path": [0, 1, 3, 8], "contrib": -2.67e-08}, {"idx": 4088, "nodes": {"0": {"f": 2, "t": 1.0000000180025095e-35}, "1": {"f": 7, "t": 0.10605949999990118}, "3": {"f": 6, "t": 0.07788600000094449}, "7": {"leaf": -4.04e-08}, "8": {"leaf": 3.3208e-06}, "4": {"leaf": -8.736e-06}, "2": {"f": 3, "t": 1.0000000180025095e-35}, "5": {"f": 6, "t": -0.022218999999950025}, "11": {"leaf": -1.1931e-05}, "12": {"leaf": 0}, "6": {"f": 6, "t": -0.030477500001325094}, "13": {"leaf": 2.38722e-05}, "14": {"leaf": 3.5e-08}}, "path": [0, 1, 3, 7], "contrib": -4.04e-08}], "remainder": 0.023564941}, "838": {"nTrees": 1537, "bestIter": 1537, "state": {"J": 33, "v1": 3, "v2": 0, "v3": 1, "r": 1, "p": 0, "theory_diff": 0.022477, "theory_diff_abs": 0.022477, "EAmes": 6589.142432, "ECDSD": 6589.164909, "Emean": 6589.1536705, "dPred": 0.0109471574355894, "EMarvel": 6589.164291, "errBase": 0.0106205000001864, "errML": 0.00032665743540300114}, "trees": [{"idx": 0, "nodes": {"0": {"f": 6, "t": 0.02552550000018528}, "1": {"f": 6, "t": 0.00418649999983245}, "3": {"f": 6, "t": -0.010605999999825142}, "7": {"leaf": 0.0083131808}, "8": {"leaf": 0.0084009631}, "4": {"f": 6, "t": 0.01250549999986106}, "9": {"leaf": 0.0084547828}, "10": {"leaf": 0.0085032456}, "2": {"f": 6, "t": 0.05540800000017044}, "5": {"f": 6, "t": 0.038597499999468717}, "11": {"leaf": 0.0085667255}, "12": {"leaf": 0.0086338807}, "6": {"f": 6, "t": 0.07562750000033704}, "13": {"leaf": 0.0087202088}, "14": {"leaf": 0.0088507273}}, "path": [0, 1, 4, 10], "contrib": 0.0085032456}, {"idx": 1, "nodes": {"0": {"f": 6, "t": 0.02552550000018528}, "1": {"f": 6, "t": 0.00418649999983245}, "3": {"f": 6, "t": -0.010605999999825142}, "7": {"leaf": -0.0001806627}, "8": {"leaf": -9.37583e-05}, "4": {"f": 6, "t": 0.01250549999986106}, "9": {"leaf": -4.04768e-05}, "10": {"leaf": 7.5014e-06}, "2": {"f": 6, "t": 0.05540800000017044}, "5": {"f": 6, "t": 0.038597499999468717}, "11": {"leaf": 7.03464e-05}, "12": {"leaf": 0.0001368301}, "6": {"f": 6, "t": 0.07562750000033704}, "13": {"leaf": 0.0002222949}, "14": {"leaf": 0.0003515083}}, "path": [0, 1, 4, 10], "contrib": 7.5014e-06}, {"idx": 80, "nodes": {"0": {"f": 3, "t": 1.5000000000000002}, "1": {"f": 0, "t": 44.50000000000001}, "3": {"f": 1, "t": 5.500000000000001}, "7": {"leaf": -1.66312e-05}, "8": {"leaf": -0.0001649074}, "4": {"f": 1, "t": 1.0000000180025095e-35}, "9": {"leaf": 3.20197e-05}, "10": {"leaf": 5.2233e-06}, "2": {"f": 2, "t": 1.0000000180025095e-35}, "5": {"f": 3, "t": 2.5000000000000004}, "11": {"leaf": 2.76764e-05}, "12": {"leaf": 7.47026e-05}, "6": {"f": 1, "t": 1.0000000180025095e-35}, "13": {"leaf": -2.53777e-05}, "14": {"leaf": 3.08549e-05}}, "path": [0, 1, 3, 7], "contrib": -1.66312e-05}, {"idx": 307, "nodes": {"0": {"f": 6, "t": 0.006912500000453293}, "1": {"f": 7, "t": 0.01788299999907395}, "3": {"f": 6, "t": -0.005406499999935476}, "7": {"leaf": -1.034e-05}, "8": {"leaf": -4.0442e-06}, "4": {"f": 7, "t": 0.04968949999988582}, "9": {"leaf": -2.27789e-05}, "10": {"leaf": -6.02824e-05}, "2": {"f": 7, "t": 0.04886050000050091}, "5": {"f": 7, "t": 0.022544500000094562}, "11": {"leaf": 1.772e-07}, "12": {"leaf": 4.7698e-06}, "6": {"f": 1, "t": 3.5000000000000004}, "13": {"leaf": 1.76323e-05}, "14": {"leaf": -7.359e-06}}, "path": [0, 2, 5, 11], "contrib": 1.772e-07}, {"idx": 537, "nodes": {"0": {"f": 7, "t": 0.10798499999964407}, "1": {"f": 5, "t": 1.0000000180025095e-35}, "3": {"f": 7, "t": 0.02955399999973452}, "7": {"leaf": -2.11e-07}, "8": {"leaf": 2.3215e-06}, "4": {"f": 0, "t": 47.50000000000001}, "9": {"leaf": -4.145e-07}, "10": {"leaf": -5.772e-06}, "2": {"leaf": 1.68568e-05}}, "path": [0, 1, 3, 7], "contrib": -2.11e-07}, {"idx": 768, "nodes": {"0": {"f": 2, "t": 3.5000000000000004}, "1": {"f": 6, "t": -0.01432999999997264}, "3": {"f": 7, "t": 0.04886050000050091}, "7": {"leaf": -1.0236e-06}, "8": {"leaf": -1.42144e-05}, "4": {"f": 4, "t": 5.500000000000001}, "9": {"leaf": 0}, "10": {"leaf": 1.32093e-05}, "2": {"f": 7, "t": 0.017745499999819007}, "5": {"leaf": 0}, "6": {"leaf": 1.31295e-05}}, "path": [0, 1, 4, 9], "contrib": 0}, {"idx": 999, "nodes": {"0": {"f": 4, "t": 1.5000000000000002}, "1": {"f": 3, "t": 3.5000000000000004}, "3": {"f": 2, "t": 1.0000000180025095e-35}, "7": {"leaf": 8.99e-07}, "8": {"leaf": -5.575e-07}, "4": {"f": 2, "t": 1.0000000180025095e-35}, "9": {"leaf": -7.9909e-06}, "10": {"leaf": 0}, "2": {"f": 0, "t": 35.50000000000001}, "5": {"f": 0, "t": 32.50000000000001}, "11": {"leaf": 0}, "12": {"leaf": 9.9107e-06}, "6": {"f": 4, "t": 3.5000000000000004}, "13": {"leaf": -1.5703e-06}, "14": {"leaf": 1.0202e-06}}, "path": [0, 1, 3, 7], "contrib": 8.99e-07}, {"idx": 1229, "nodes": {"0": {"f": 6, "t": 0.009081999999807524}, "1": {"f": 1, "t": 1.0000000180025095e-35}, "3": {"f": 3, "t": 3.5000000000000004}, "7": {"leaf": 1.6243e-06}, "8": {"leaf": -4.7335e-06}, "4": {"f": 0, "t": 39.50000000000001}, "9": {"leaf": 0}, "10": {"leaf": -2.3099e-06}, "2": {"f": 7, "t": 0.012655999999651614}, "5": {"f": 6, "t": 0.01250549999986106}, "11": {"leaf": 0}, "12": {"leaf": 3.12172e-05}, "6": {"f": 6, "t": 0.013882499999965605}, "13": {"leaf": -2.8862e-06}, "14": {"leaf": 8.68e-08}}, "path": [0, 2, 6, 14], "contrib": 8.68e-08}], "remainder": 0.0024520898}};
+
+/* =====================================================================
+   SECTION 2 — VALIDATION (runs at boot; failures render the dev panel)
+   ===================================================================== */
+function devError(msg){
+  var p = document.getElementById('devError');
+  p.textContent = 'VALIDATION FAILURE \u2014 do not present: ' + msg;
+  p.classList.add('is-visible');
+  throw new Error(msg);
+}
+
+// Re-traverse an embedded tree in JS with the state's features.
+// Node ids: root=0, left=2i+1, right=2i+2. Split rule: value <= threshold -> left.
+function traverseTree(nodes, x){
+  var id = 0, path = [0];
+  while (nodes[id].leaf === undefined){
+    var n = nodes[id];
+    id = (x[n.f] <= n.t) ? id * 2 + 1 : id * 2 + 2;
+    path.push(id);
+  }
+  return { path: path, leaf: nodes[id].leaf };
+}
+
+function stateVector(s){
+  return [s.J, s.v1, s.v2, s.v3, s.r, s.p, s.theory_diff, s.theory_diff_abs];
+}
+
+function validateAll(){
+  ISO_ORDER.forEach(function(iso){
+    var jd = JOURNEY[iso];
+    if (!jd) devError('missing journey data for ' + iso);
+    var s = jd.state;
+    var x = stateVector(s);
+    // (a) E_mean recomputes from EAmes/ECDSD
+    if (Math.abs((s.EAmes + s.ECDSD) / 2 - s.Emean) > 1e-5) devError(iso + ': E_mean mismatch');
+    // (b) theory_diff consistency
+    if (Math.abs((s.ECDSD - s.EAmes) - s.theory_diff) > 1e-5) devError(iso + ': theory_diff mismatch');
+    // (c) each embedded tree: JS traversal reproduces the recorded path and contribution
+    var sum = 0;
+    jd.trees.forEach(function(t, k){
+      var r = traverseTree(t.nodes, x);
+      if (Math.abs(r.leaf - t.contrib) > 1e-9) devError(iso + ': tree ' + t.idx + ' contribution mismatch');
+      if (r.path.join(',') !== t.path.join(',')) devError(iso + ': tree ' + t.idx + ' path mismatch');
+      sum += r.leaf;
+    });
+    // (d) contributions + remainder equal the model's exact prediction
+    if (Math.abs(sum + jd.remainder - s.dPred) > 1e-9) devError(iso + ': sum+remainder != prediction');
+    // (e) calibrated energy is consistent
+    if (Math.abs((s.Emean + s.dPred) - (s.EMarvel - (s.EMarvel - s.Emean - s.dPred))) > 1e-9) devError(iso + ': E_hat algebra');
+    if (Math.abs(Math.abs(s.EMarvel - (s.Emean + s.dPred)) - s.errML) > 1e-5) devError(iso + ': errML mismatch');
+    // (f) fold aggregates sane
+    var f = LOIO_RESULTS[iso];
+    if (!(f.mae.ml < f.mae.mean)) devError(iso + ': fold aggregate ordering');
+  });
+}
+
+/* =====================================================================
+   SECTION 3 — APP STATE + TRANSITIONS
+   ===================================================================== */
+var SCENES = ['open','pool','remove','train','features','trees','forward','apply','result','continue'];
+var state = { scene:0, iso:null, visited:{}, timers:[], tj:null, pendingIso:null };
+var REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+var stageInner = document.getElementById('stageInner');
+
+function clearTimers(){ state.timers.forEach(clearTimeout); state.timers = []; }
+function after(ms, fn){ state.timers.push(setTimeout(fn, REDUCED ? 0 : ms)); }
+
+function setProgress(i){
+  var d = document.getElementById('progressDots'); d.innerHTML = '';
+  SCENES.forEach(function(_, k){
+    var s = document.createElement('span');
+    if (k < i) s.className = 'is-done'; else if (k === i) s.className = 'is-active';
+    d.appendChild(s);
+  });
+}
+
+function goTo(idx, buildFn){
+  clearTimers();
+  state.scene = idx;
+  stageInner.classList.add('is-exiting');
+  setTimeout(function(){
+    stageInner.innerHTML = '';
+    buildFn(stageInner);
+    setProgress(idx);
+    stageInner.classList.remove('is-exiting');
+    stageInner.classList.add('is-entering');
+    void stageInner.offsetWidth;
+    stageInner.classList.remove('is-entering');
+    document.querySelector('.stage-outer').scrollTop = 0;
+  }, REDUCED ? 0 : 420);
+}
+
+function el(tag, cls, html){
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+}
+function isoComposition(code){
+  function o(d){ return d === '6' ? '\u00b9\u2076O' : (d === '7' ? '\u00b9\u2077O' : '\u00b9\u2078O'); }
+  function c(d){ return d === '2' ? '\u00b9\u00b2C' : '\u00b9\u00b3C'; }
+  return o(code[0]) + '\u2013' + c(code[1]) + '\u2013' + o(code[2]);
+}
+function isoTag(){
+  return el('p', 'iso-tag', 'ISOTOPOLOGUE <strong>' + state.iso + '</strong> (' + isoComposition(state.iso) + ') \u2014 WITHHELD');
+}
+function fmtS(v, dp){ dp = dp || 6; return (v >= 0 ? '+' : '\u2212') + Math.abs(v).toFixed(dp); }
+function fmtP(v, dp){ dp = dp || 6; return (v >= 0 ? '' : '\u2212') + Math.abs(v).toFixed(dp); }
+
+// Global fixed log scale for MAE comparisons
+var ALLV = [];
+ISO_ORDER.forEach(function(i){ var m = LOIO_RESULTS[i].mae; ALLV.push(m.ames, m.cdsd, m.mean, m.ml); });
+var LMIN = Math.log10(Math.min.apply(null, ALLV)), LMAX = Math.log10(Math.max.apply(null, ALLV));
+function gPct(v){ return 6 + ((Math.log10(v) - LMIN) / (LMAX - LMIN)) * 88; }
+
+/* =====================================================================
+   SECTION 4 — SCENE RENDERERS
+   ===================================================================== */
+
+/* Scene 1 — opening question */
+function scOpen(t){
+  var w = el('div', 'open-wrap');
+  w.innerHTML =
+    '<svg class="co2-svg" viewBox="0 0 320 88" aria-hidden="true">' +
+      '<line class="bond" x1="98" y1="40" x2="150" y2="40"></line><line class="bond" x1="98" y1="46" x2="150" y2="46"></line>' +
+      '<line class="bond" x1="170" y1="40" x2="222" y2="40"></line><line class="bond" x1="170" y1="46" x2="222" y2="46"></line>' +
+      '<g class="o-l"><circle class="atom-o" cx="88" cy="43" r="15"></circle><text x="88" y="76" text-anchor="middle">O</text></g>' +
+      '<circle class="atom-c" cx="160" cy="43" r="12"></circle><text x="160" y="76" text-anchor="middle">C</text>' +
+      '<g class="o-r"><circle class="atom-o" cx="232" cy="43" r="15"></circle><text x="232" y="76" text-anchor="middle">O</text></g>' +
+    '</svg>';
+  w.appendChild(el('h1', 'open-title', 'Can AI calibrate the energy levels of a CO<sub>2</sub> isotopologue it has never seen?'));
+  w.appendChild(el('p', 'open-sub', 'Remove one isotopologue from training. Let the other eleven teach the model. Then test the withheld species.'));
+  var b = el('button', 'btn', 'Run the experiment');
+  b.addEventListener('click', function(){ goTo(1, scPool); });
+  w.appendChild(b);
+  t.appendChild(w);
+}
+
+/* Scene 2 — the isotopologue pool with confirmation */
+function scPool(t){
+  t.appendChild(el('h2', 'scene-title', 'Choose one isotopologue to withhold completely.'));
+  var pool = el('div', 'pool'); pool.setAttribute('role', 'group'); pool.setAttribute('aria-label', 'Twelve CO2 isotopologues');
+  var confirmLine = el('p', 'confirm-line', '&nbsp;');
+  var btnRow = el('div', 'btn-row');
+  var okBtn = el('button', 'btn', 'Withhold it');
+  var otherBtn = el('button', 'btn btn-ghost', 'Choose another');
+  okBtn.style.display = 'none'; otherBtn.style.display = 'none';
+
+  function tokenGlyph(){
+    return '<svg viewBox="0 0 56 16" aria-hidden="true">' +
+      '<line class="t-b" x1="12" y1="8" x2="24" y2="8"></line><line class="t-b" x1="32" y1="8" x2="44" y2="8"></line>' +
+      '<circle class="t-o" cx="8" cy="8" r="5"></circle><circle class="t-c" cx="28" cy="8" r="4"></circle><circle class="t-o" cx="48" cy="8" r="5"></circle></svg>';
+  }
+  ISO_ORDER.forEach(function(iso){
+    var tk = el('button', 'token' + (state.visited[iso] ? ' is-visited' : ''));
+    tk.innerHTML = '<span class="code">' + iso + '</span>' + tokenGlyph();
+    tk.setAttribute('aria-label', 'Isotopologue ' + iso + ', ' + isoComposition(iso));
+    tk.addEventListener('click', function(){
+      state.pendingIso = iso;
+      Array.prototype.forEach.call(pool.children, function(c){ c.classList.remove('is-selected'); });
+      tk.classList.add('is-selected');
+      confirmLine.innerHTML = 'Withhold <b>' + iso + '</b> (' + isoComposition(iso) + ') from training?';
+      okBtn.style.display = 'inline-block'; otherBtn.style.display = 'inline-block';
+    });
+    pool.appendChild(tk);
+  });
+  okBtn.addEventListener('click', function(){
+    state.iso = state.pendingIso;
+    state.tj = JOURNEY[state.iso];
+    goTo(2, scRemove);
+  });
+  otherBtn.addEventListener('click', function(){
+    state.pendingIso = null;
+    Array.prototype.forEach.call(pool.children, function(c){ c.classList.remove('is-selected'); });
+    confirmLine.innerHTML = '&nbsp;';
+    okBtn.style.display = 'none'; otherBtn.style.display = 'none';
+  });
+  btnRow.appendChild(okBtn); btnRow.appendChild(otherBtn);
+  t.appendChild(pool); t.appendChild(confirmLine); t.appendChild(btnRow);
+}
+
+/* Scene 3 — a laboratory manipulator removes the selected isotopologue */
+function scRemove(t){
+  var iso = state.iso, f = LOIO_RESULTS[iso];
+  t.appendChild(el('h2', 'scene-title', 'Isotopologue ' + iso + ' is withheld.'));
+  var others = ISO_ORDER.filter(function(x){ return x !== iso; });
+
+  // Grid of 11 remaining tiles + the selected one being carried by the arm
+  var tiles = '';
+  others.forEach(function(o, i){
+    var cx = 40 + (i % 6) * 62, cy = 150 + Math.floor(i / 6) * 40;
+    tiles += '<g class="pool-tile"><rect x="' + (cx - 24) + '" y="' + (cy - 12) + '" width="48" height="24" rx="2"></rect>' +
+             '<text x="' + cx + '" y="' + (cy + 4) + '" text-anchor="middle">' + o + '</text></g>';
+  });
+  var svg =
+    '<svg class="removal-svg" viewBox="0 0 640 230" role="img" aria-label="A manipulator moves ' + iso + ' into the withheld chamber">' +
+      tiles +
+      '<rect class="chamber" x="480" y="120" width="140" height="90"></rect>' +
+      '<text class="chamber-label" x="550" y="112" text-anchor="middle">WITHHELD</text>' +
+      // two-segment manipulator arm; the whole group translates
+      '<g class="arm-group" id="armGroup">' +
+        '<path class="arm" d="M 40 8 L 120 30 L 175 78"></path>' +
+        '<path class="arm-claw" d="M 165 86 L 175 78 L 186 85"></path>' +
+      '</g>' +
+      '<g class="carried" id="carried">' +
+        '<g class="sel-tile"><rect x="151" y="90" width="48" height="24" rx="2"></rect>' +
+        '<text x="175" y="106" text-anchor="middle">' + iso + '</text></g>' +
+      '</g>' +
+    '</svg>';
+  var holder = el('div'); holder.innerHTML = svg;
+  t.appendChild(holder);
+
+  t.appendChild(el('p', 'scene-msg',
+    'Training states from ' + iso + ': <strong>0</strong><br>' +
+    'Every state belonging to ' + iso + ' is excluded from this model \u2014 all <strong>' + f.Neval.toLocaleString() + '</strong> of its MARVEL-known states.'));
+
+  var btnRow = el('div', 'btn-row');
+  var b = el('button', 'btn', 'Continue');
+  btnRow.appendChild(b);
+  t.appendChild(btnRow);
+  b.addEventListener('click', function(){ goTo(3, scTrain); });
+
+  // Animate the arm carrying the tile into the chamber (reduced motion: instant transfer)
+  after(500, function(){
+    var arm = document.getElementById('armGroup'), car = document.getElementById('carried');
+    if (arm) arm.style.transform = 'translate(375px, 60px)';
+    if (car) car.style.transform = 'translate(375px, 60px)';
+  });
+}
+
+/* Scene 4 — the other eleven enter training */
+function scTrain(t){
+  t.appendChild(isoTag());
+  t.appendChild(el('h2', 'scene-title', 'The other eleven enter training.'));
+  var others = ISO_ORDER.filter(function(x){ return x !== state.iso; });
+  var tiles = '';
+  others.forEach(function(o, i){
+    var y = 20 + i * 17;
+    tiles += '<g class="tt"><rect x="8" y="' + (y - 8) + '" width="44" height="15" rx="2"></rect>' +
+             '<text x="30" y="' + (y + 4) + '" text-anchor="middle">' + o + '</text></g>' +
+             '<path class="flow" d="M 54 ' + y + ' C 140 ' + y + ', 160 105, 240 105"></path>';
+  });
+  var svg =
+    '<svg class="train-svg" viewBox="0 0 620 215" role="img" aria-label="Eleven isotopologues stream training records into the model">' +
+      tiles +
+      '<rect class="chamber" x="240" y="60" width="180" height="92"></rect>' +
+      '<text class="chamber-label" x="330" y="52" text-anchor="middle">TRAINING</text>' +
+      '<text x="330" y="98" text-anchor="middle" style="fill:var(--text); font-family:var(--font-mono); font-size:13px;">LightGBM</text>' +
+      '<text x="330" y="118" text-anchor="middle" style="fill:var(--dim); font-family:var(--font-mono); font-size:10px;">residual model</text>' +
+    '</svg>';
+  var holder = el('div'); holder.innerHTML = svg;
+  t.appendChild(holder);
+
+  t.appendChild(el('p', 'record-strip', 'state records: J, v\u2081, v\u2082, v\u2083, r, p, E<sub>Ames</sub>, E<sub>CDSD</sub>, E<sub>MARVEL</sub>'));
+  t.appendChild(el('p', 'eq-line', 'E<sub>mean</sub> = \u00bd (E<sub>Ames</sub> + E<sub>CDSD</sub>)'));
+  t.appendChild(el('p', 'eq-line', '\u0394E = <span class="hl2">E<sub>MARVEL</sub></span> \u2212 <span class="hl">E<sub>mean</sub></span> &nbsp;\u2192&nbsp; the training target'));
+  t.appendChild(el('p', 'scene-msg', 'The other eleven teach the model how calculation\u2013experiment residuals vary across rovibrational state space.'));
+
+  var btnRow = el('div', 'btn-row');
+  var b = el('button', 'btn', 'Meet the eight inputs');
+  b.addEventListener('click', function(){ goTo(4, scFeatures); });
+  btnRow.appendChild(b);
+  t.appendChild(btnRow);
+}
+
+/* Scene 5 — feature orientation, two groups */
+function scFeatures(t){
+  t.appendChild(isoTag());
+  t.appendChild(el('h2', 'scene-title', 'The eight inputs.'));
+
+  var page1 = el('div');
+  page1.appendChild(el('p', 'feat-group-title', 'Where is this state in the rovibrational structure?'));
+  var g1 = el('div', 'feat-grid');
+  ['J','v1','v2','v3','r','p'].forEach(function(k){
+    var d = FEATURE_DEFS[k];
+    var card = el('div', 'feat-card', '<span class="sym">' + d.sym + '</span> \u2014 <span class="desc">' + d.desc + '</span>');
+    if (d.mode){
+      var m = el('div');
+      m.innerHTML =
+        '<svg class="mode-svg mode-' + d.mode + '" viewBox="0 0 200 52" aria-hidden="true">' +
+        '<line class="m-b" x1="62" y1="26" x2="88" y2="26"></line><line class="m-b" x1="112" y1="26" x2="138" y2="26"></line>' +
+        '<g class="mo-l"><circle class="m-o" cx="52" cy="26" r="10"></circle></g>' +
+        '<g class="mo-c"><circle class="m-c" cx="100" cy="26" r="8"></circle></g>' +
+        '<g class="mo-r"><circle class="m-o" cx="148" cy="26" r="10"></circle></g></svg>';
+      card.appendChild(m);
+    }
+    g1.appendChild(card);
+  });
+  page1.appendChild(g1);
+  page1.appendChild(el('p', 'fine', 'The molecular motion shown is a visual representation of the corresponding normal mode \u2014 a quantum number is not itself a continuous classical motion.'));
+
+  var page2 = el('div'); page2.style.display = 'none';
+  page2.appendChild(el('p', 'feat-group-title', 'Where do the two calculations disagree?'));
+  var g2 = el('div', 'feat-grid');
+  ['theory_diff','theory_diff_abs'].forEach(function(k){
+    var d = FEATURE_DEFS[k];
+    g2.appendChild(el('div', 'feat-card diag', '<span class="sym">' + d.sym + '</span> \u2014 <span class="desc">' + d.desc + '</span>'));
+  });
+  page2.appendChild(g2);
+  page2.appendChild(el('p', 'scene-msg', 'Different trees may split on different features \u2014 not every feature appears in every tree\u2019s path.'));
+
+  t.appendChild(page1); t.appendChild(page2);
+  var btnRow = el('div', 'btn-row');
+  var next = el('button', 'btn', 'Next');
+  next.addEventListener('click', function(){
+    if (page2.style.display === 'none'){ page1.style.display = 'none'; page2.style.display = 'block'; next.textContent = 'Enter the trees'; }
+    else goTo(5, scTrees);
+  });
+  btnRow.appendChild(next);
+  t.appendChild(btnRow);
+}
+
+/* =====================================================================
+   Scene 6 — THE TREE JOURNEY (exact trees from the exported fold model)
+   ===================================================================== */
+function treeCategory(nodes){
+  var f = nodes[0].f;
+  return (f >= 6) ? 'a calculation-disagreement feature' : 'a quantum-state feature';
+}
+
+// Render a real tree (depth <= 3) with all nodes; ids follow root=0, L=2i+1, R=2i+2
+function realTreeSVG(nodes){
+  var W = 680, H = 268, DY = [26, 100, 172, 240];
+  function depthOf(id){ var d = 0; while (id > 0){ id = Math.floor((id - 1) / 2); d++; } return d; }
+  function xFor(id){
+    var d = depthOf(id), posInLevel = id - (Math.pow(2, d) - 1);
+    return (W / Math.pow(2, d)) * (posInLevel + 0.5);
+  }
+  var parts = [];
+  Object.keys(nodes).map(Number).sort(function(a,b){ return a - b; }).forEach(function(id){
+    if (id > 0){
+      var pid = Math.floor((id - 1) / 2);
+      parts.push('<line class="e" id="e' + id + '" x1="' + xFor(pid) + '" y1="' + (DY[depthOf(pid)] + 12) + '" x2="' + xFor(id) + '" y2="' + (DY[depthOf(id)] - 12) + '"></line>');
+    }
+  });
+  Object.keys(nodes).map(Number).sort(function(a,b){ return a - b; }).forEach(function(id){
+    var n = nodes[id], x = xFor(id), y = DY[depthOf(id)];
+    if (n.leaf !== undefined){
+      parts.push('<g class="lf" id="n' + id + '"><rect x="' + (x - 44) + '" y="' + (y - 12) + '" width="88" height="24" rx="2"></rect>' +
+        '<text x="' + x + '" y="' + (y + 4.5) + '" text-anchor="middle">' + fmtS(n.leaf, 5) + '</text></g>');
+    } else {
+      var label = featSymSVG(n.f) + ' \u2264 ' + (+n.t).toPrecision(5);
+      var wdt = Math.max(120, label.replace(/<[^>]+>/g,'').length * 8 + 22);
+      parts.push('<g class="n" id="n' + id + '"><rect x="' + (x - wdt/2) + '" y="' + (y - 13) + '" width="' + wdt + '" height="26" rx="2"></rect>' +
+        '<text x="' + x + '" y="' + (y + 4.5) + '" text-anchor="middle">' + label + '</text></g>');
+    }
+  });
+  return '<svg class="tree-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Actual decision tree from the trained model">' + parts.join('') + '</svg>';
+}
+
+function scTrees(t){
+  var jd = state.tj, s = jd.state;
+  var x = stateVector(s);
+  t.appendChild(isoTag());
+  t.appendChild(el('h2', 'scene-title', 'How does LightGBM build the correction?'));
+  t.appendChild(el('p', 'scene-msg', 'Each shallow tree asks a small question. Its leaf adds a small contribution. The ensemble combines them.'));
+
+  var intro = el('p', 'tj-intro'); intro.id = 'tjIntro';
+  var stageHolder = el('div'); stageHolder.id = 'tjStage';
+  var featval = el('p', 'tj-featval'); featval.id = 'tjFeatval';
+  var accum = el('div', 'accum');
+  accum.innerHTML = '<span class="lbl">Sum of shown trees</span><br>' +
+    '<span class="val" id="accumVal">+0.000000</span> <span class="sub">cm<sup>\u22121</sup></span><br>' +
+    '<span class="sub" id="accumSub">0 of ' + jd.trees.length + ' representative trees added</span>';
+  t.appendChild(intro); t.appendChild(stageHolder); t.appendChild(featval); t.appendChild(accum);
+
+  t.appendChild(el('p', 'fine',
+    'Representative actual trees from the trained ensemble \u2014 real structures, thresholds and leaf values from the exported fold model. ' +
+    'They are not consecutive boosting rounds, so this panel sums only the shown trees; the remaining ensemble is added next.'));
+
+  var controls = el('div', 'tj-controls');
+  var nextSplit = el('button', 'btn', 'Next split');
+  var autoBtn = el('button', 'btn btn-ghost', 'Auto-play');
+  var pauseBtn = el('button', 'btn btn-ghost', 'Pause');
+  var skipBtn = el('button', 'btn btn-ghost', 'Skip to result');
+  pauseBtn.style.display = 'none';
+  controls.appendChild(nextSplit); controls.appendChild(autoBtn); controls.appendChild(pauseBtn); controls.appendChild(skipBtn);
+  t.appendChild(controls);
+
+  // ---- traversal machine ----
+  var tj = { treeIdx:0, stepIdx:0, sum:0, auto:false, done:false };
+
+  function loadTree(k){
+    var tr = jd.trees[k];
+    document.getElementById('tjStage').innerHTML = realTreeSVG(tr.nodes);
+    var cat = treeCategory(tr.nodes);
+    document.getElementById('tjIntro').innerHTML =
+      'Tree <span class="tno">#' + tr.idx + '</span> of ' + jd.nTrees + ' checks ' + cat + '.';
+    var rootF = tr.nodes[0].f;
+    document.getElementById('tjFeatval').innerHTML =
+      'This state\u2019s value: ' + featSym(rootF) + ' = ' + (+x[rootF]).toPrecision(6);
+    tj.stepIdx = 0;
+    // light the root
+    var rootEl = document.getElementById('n0'); if (rootEl) rootEl.classList.add('on');
+  }
+
+  function stepOnce(){
+    if (tj.done) return;
+    var tr = jd.trees[tj.treeIdx];
+    var path = tr.path;
+    if (tj.stepIdx < path.length - 1){
+      // advance one edge along the genuine path
+      var from = path[tj.stepIdx], to = path[tj.stepIdx + 1];
+      var eEl = document.getElementById('e' + to); if (eEl) eEl.classList.add('on');
+      var nEl = document.getElementById('n' + to); if (nEl) nEl.classList.add('on');
+      // dim the sibling subtree
+      var sib = (to % 2 === 1) ? to + 1 : to - 1;
+      dimSubtree(tr.nodes, sib);
+      // if we just reached an internal node, show its feature value
+      var reached = tr.nodes[to];
+      if (reached && reached.leaf === undefined){
+        document.getElementById('tjFeatval').innerHTML =
+          'This state\u2019s value: ' + featSym(reached.f) + ' = ' + (+x[reached.f]).toPrecision(6);
+      } else {
+        document.getElementById('tjFeatval').innerHTML =
+          'Tree contribution: <b style="color:var(--ml)">' + fmtS(tr.contrib) + ' cm<sup>\u22121</sup></b>';
+      }
+      tj.stepIdx++;
+      if (tj.stepIdx === path.length - 1){
+        // leaf reached: add to accumulator
+        tj.sum = +(tj.sum + tr.contrib).toFixed(10);
+        document.getElementById('accumVal').textContent = fmtS(tj.sum);
+        document.getElementById('accumSub').textContent = (tj.treeIdx + 1) + ' of ' + jd.trees.length + ' representative trees added';
+      }
+    } else {
+      // move to next tree or finish
+      if (tj.treeIdx < jd.trees.length - 1){ tj.treeIdx++; loadTree(tj.treeIdx); }
+      else { tj.done = true; goTo(6, scForward); return; }
+    }
+    if (tj.auto && !tj.done) after(1050, stepOnce);
+  }
+
+  function dimSubtree(nodes, id){
+    if (nodes[id] === undefined) return;
+    var e = document.getElementById('e' + id); if (e) e.classList.add('off');
+    var n = document.getElementById('n' + id); if (n) n.classList.add('off');
+    dimSubtree(nodes, id * 2 + 1); dimSubtree(nodes, id * 2 + 2);
+  }
+
+  nextSplit.addEventListener('click', function(){ tj.auto = false; pauseBtn.style.display = 'none'; autoBtn.style.display = 'inline-block'; stepOnce(); });
+  autoBtn.addEventListener('click', function(){ tj.auto = true; autoBtn.style.display = 'none'; pauseBtn.style.display = 'inline-block'; stepOnce(); });
+  pauseBtn.addEventListener('click', function(){ tj.auto = false; pauseBtn.style.display = 'none'; autoBtn.style.display = 'inline-block'; clearTimers(); });
+  skipBtn.addEventListener('click', function(){ tj.done = true; clearTimers(); goTo(6, scForward); });
+
+  loadTree(0);
+  state.tjMachine = tj;
+}
+
+/* Scene 7 — fast-forward through the ensemble to the exact prediction */
+function scForward(t){
+  var jd = state.tj, s = jd.state;
+  var shownSum = jd.trees.reduce(function(a, tr){ return a + tr.contrib; }, 0);
+  var ehat = s.Emean + s.dPred;
+  t.appendChild(isoTag());
+  t.appendChild(el('h2', 'scene-title', 'The trained ensemble contains many more shallow trees.'));
+  t.appendChild(el('p', 'scene-msg',
+    'This fold used <strong>' + jd.bestIter.toLocaleString() + '</strong> boosting rounds (early stopping). ' +
+    'Adding every remaining tree\u2019s contribution:'));
+
+  var accum = el('div', 'accum');
+  accum.innerHTML = '<span class="lbl">Predicted correction \u0394\u00ca</span><br>' +
+    '<span class="val" id="fwVal">' + fmtS(shownSum) + '</span> <span class="sub">cm<sup>\u22121</sup></span><br>' +
+    '<span class="sub" id="fwSub">' + jd.trees.length + ' shown trees</span>';
+  t.appendChild(accum);
+
+  var cols = el('div', 'three-cols'); cols.style.marginTop = '1.2rem';
+  cols.appendChild(el('div', 'col-box mean', '<span class="lbl">Physics baseline E<sub>mean</sub></span><span class="val">' + fmtP(s.Emean) + '</span>'));
+  cols.appendChild(el('div', 'col-box corr', '<span class="lbl">Learned residual \u0394\u00ca</span><span class="val" id="colDelta">\u2026</span>'));
+  cols.appendChild(el('div', 'col-box final', '<span class="lbl">Final calibrated \u00ca</span><span class="val" id="colEhat">\u2026</span>'));
+  t.appendChild(cols);
+
+  var reveal = el('div'); reveal.id = 'marvelBlock'; reveal.style.opacity = '0'; reveal.style.transition = 'opacity .5s ease';
+  var mc = el('div', 'three-cols');
+  mc.appendChild(el('div', 'col-box marv', '<span class="lbl">Experiment E<sub>MARVEL</sub></span><span class="val">' + fmtP(s.EMarvel) + '</span>'));
+  mc.appendChild(el('div', 'col-box', '<span class="lbl">|E<sub>MARVEL</sub> \u2212 \u00ca|</span><span class="val" style="color:var(--ml)">' + s.errML.toFixed(6) + '</span>'));
+  mc.appendChild(el('div', 'col-box', '<span class="lbl">Baseline alone was off by</span><span class="val" style="color:var(--gold)">' + s.errBase.toFixed(6) + '</span>'));
+  reveal.appendChild(mc);
+  t.appendChild(reveal);
+
+  var btnRow = el('div', 'btn-row');
+  var b = el('button', 'btn', 'Apply the model to the withheld isotopologue');
+  b.style.display = 'none';
+  b.addEventListener('click', function(){ goTo(7, scApply); });
+  btnRow.appendChild(b);
+  t.appendChild(btnRow);
+
+  // animate the remainder converging to the exact prediction, then reveal E_hat and MARVEL
+  var steps = REDUCED ? 1 : 14, k = 0;
+  function tick(){
+    k++;
+    var v = shownSum + jd.remainder * (k / steps);
+    document.getElementById('fwVal').textContent = fmtS(v);
+    document.getElementById('fwSub').textContent = k < steps ? '+ remaining ' + (jd.nTrees - jd.trees.length).toLocaleString() + ' trees\u2026' : 'all ' + jd.nTrees.toLocaleString() + ' trees combined';
+    if (k < steps) after(120, tick);
+    else {
+      document.getElementById('fwVal').textContent = fmtS(s.dPred);
+      document.getElementById('colDelta').textContent = fmtS(s.dPred);
+      document.getElementById('colEhat').textContent = fmtP(ehat);
+      after(500, function(){
+        document.getElementById('marvelBlock').style.opacity = '1';
+        b.style.display = 'inline-block';
+      });
+    }
+  }
+  after(500, tick);
+}
+
+/* Scene 8 — return to the withheld isotopologue */
+function scApply(t){
+  var iso = state.iso, f = LOIO_RESULTS[iso];
+  t.appendChild(isoTag());
+  t.appendChild(el('h2', 'scene-title', 'The model is now applied to states from the isotopologue it never saw during training.'));
+  t.appendChild(el('p', 'scene-msg',
+    'It predicts corrections for the withheld isotopologue\u2019s rovibrational states \u2014 all <strong>' + f.Neval.toLocaleString() +
+    '</strong> MARVEL-known states, without retraining.'));
+  var svg =
+    '<svg class="train-svg" viewBox="0 0 620 150" role="img" aria-label="States of the withheld isotopologue pass through the trained model">' +
+      '<rect class="chamber" x="20" y="40" width="120" height="70" style="stroke:var(--withheld); stroke-dasharray:6 5;"></rect>' +
+      '<text class="chamber-label" x="80" y="32" text-anchor="middle" style="fill:var(--withheld);">' + iso + ' STATES</text>' +
+      '<path class="flow" d="M 140 75 L 250 75"></path>' +
+      '<rect class="chamber" x="250" y="40" width="160" height="70"></rect>' +
+      '<text x="330" y="70" text-anchor="middle" style="fill:var(--text); font-family:var(--font-mono); font-size:12px;">trained ensemble</text>' +
+      '<text x="330" y="90" text-anchor="middle" style="fill:var(--dim); font-family:var(--font-mono); font-size:10px;">(frozen \u2014 no retraining)</text>' +
+      '<path class="flow" d="M 410 75 L 520 75"></path>' +
+      '<text x="560" y="70" text-anchor="middle" style="fill:var(--ml); font-family:var(--font-mono); font-size:12px;">\u0394\u00ca</text>' +
+      '<text x="560" y="90" text-anchor="middle" style="fill:var(--dim); font-family:var(--font-mono); font-size:10px;">per state</text>' +
+    '</svg>';
+  var holder = el('div'); holder.innerHTML = svg;
+  t.appendChild(holder);
+  var btnRow = el('div', 'btn-row');
+  var b = el('button', 'btn', 'Reveal the fold result');
+  b.addEventListener('click', function(){ goTo(8, scResult); });
+  btnRow.appendChild(b);
+  t.appendChild(btnRow);
+}
+
+/* Scene 9 — real fold result */
+function scResult(t){
+  var iso = state.iso, f = LOIO_RESULTS[iso];
+  state.visited[iso] = true;
+  t.appendChild(isoTag());
+  t.appendChild(el('h2', 'scene-title', 'The real LOIO result for ' + iso + '.'));
+  t.appendChild(el('p', 'headline-swap',
+    fmtP(f.mae.mean) + '<span class="arrow">\u2192</span><span class="after">' + fmtP(f.mae.ml) + '</span> cm<sup>\u22121</sup>' +
+    ' &nbsp;(' + (f.mae.mean / f.mae.ml).toFixed(1) + '\u00d7 better than the mean baseline)'));
+
+  var chart = el('div', 'mae-chart');
+  var bw = el('div', 'mae-bars');
+  var bars = [
+    { l:'Ames-2021', v:f.mae.ames, c:'var(--ames)' }, { l:'CDSD-296', v:f.mae.cdsd, c:'var(--cdsd)' },
+    { l:'Mean baseline', v:f.mae.mean, c:'var(--gold)' }, { l:'ML-corrected', v:f.mae.ml, c:'var(--ml)' }
+  ];
+  bars.forEach(function(b){
+    var bar = el('div', 'mae-bar');
+    bar.innerHTML = '<span class="mae-bar-value">' + b.v.toFixed(6) + '</span>';
+    var tr = el('div', 'mae-bar-track');
+    var fl = el('div', 'mae-bar-fill'); fl.style.setProperty('--c', b.c);
+    tr.appendChild(fl); bar.appendChild(tr);
+    bar.appendChild(el('span', 'mae-bar-label', b.l));
+    bw.appendChild(bar);
+  });
+  chart.appendChild(bw); t.appendChild(chart);
+  t.appendChild(el('p', 'scale-note', 'MAE in cm\u207b\u00b9, state-weighted over the withheld fold. Bar heights use a logarithmic scale, fixed across all twelve isotopologues.'));
+  requestAnimationFrame(function(){
+    var fills = chart.querySelectorAll('.mae-bar-fill');
+    bars.forEach(function(b, i){ fills[i].style.height = gPct(b.v) + '%'; });
+  });
+
+  var bonus = el('div', 'bonus-stats');
+  [[f.Neval.toLocaleString(),'MARVEL-known states held out'],
+   [f.Ninf.toLocaleString(),'additional levels calibrated'],
+   [f.exp,'database expansion factor']].forEach(function(x){
+    bonus.appendChild(el('div', 'bonus-stat', '<span class="big">' + x[0] + '</span><span class="small">' + x[1] + '</span>'));
+  });
+  t.appendChild(bonus);
+  t.appendChild(el('p', 'claim', 'The model achieved this without training on a single state from isotopologue ' + iso + '.'));
+  t.appendChild(el('p', 'fine', 'Real precomputed leave-one-isotopologue-out result.'));
+
+  var btnRow = el('div', 'btn-row');
+  var b = el('button', 'btn', 'Continue');
+  b.addEventListener('click', function(){ goTo(9, scContinue); });
+  btnRow.appendChild(b);
+  t.appendChild(btnRow);
+}
+
+/* Scene 10 — continue: another / compare all / technical details */
+function scContinue(t){
+  t.appendChild(el('h2', 'scene-title', 'Keep exploring.'));
+  var btnRow = el('div', 'btn-row');
+  var again = el('button', 'btn', 'Try another isotopologue');
+  var cmp = el('button', 'btn btn-ghost', 'Compare all twelve');
+  var tech = el('button', 'btn btn-ghost', 'Explore technical details');
+  again.addEventListener('click', function(){ state.iso = null; state.pendingIso = null; goTo(1, scPool); });
+  cmp.addEventListener('click', function(){ renderCompare(t); });
+  tech.addEventListener('click', function(){ renderTech(t); });
+  btnRow.appendChild(again); btnRow.appendChild(cmp); btnRow.appendChild(tech);
+  t.appendChild(btnRow);
+  var extra = el('div'); extra.id = 'extraPanel'; extra.style.marginTop = '1.4rem';
+  t.appendChild(extra);
+}
+
+function renderCompare(){
+  var x = document.getElementById('extraPanel');
+  x.innerHTML = '';
+  x.appendChild(el('p', 'cmp-legend',
+    'Mean-baseline MAE <i style="background:var(--gold)"></i> \u2192 ML-corrected MAE <i style="background:var(--ml)"></i> \u2014 cm\u207b\u00b9, log scale, identical for every isotopologue. Green codes = explored.'));
+  var rows = el('div', 'cmp-rows');
+  ISO_ORDER.forEach(function(iso){
+    var f = LOIO_RESULTS[iso];
+    var b = gPct(f.mae.mean), a = gPct(f.mae.ml);
+    var row = el('div', 'cmp-row');
+    row.appendChild(el('span', 'cmp-iso' + (state.visited[iso] ? ' is-visited' : ''), iso));
+    var tr = el('div', 'cmp-track');
+    var cn = el('div', 'cmp-conn'); cn.style.left = Math.min(a, b) + '%'; cn.style.width = Math.abs(a - b) + '%';
+    var d1 = el('div', 'cmp-dot b'); d1.style.left = b + '%'; d1.title = 'Mean baseline: ' + f.mae.mean.toFixed(6);
+    var d2 = el('div', 'cmp-dot a'); d2.style.left = a + '%'; d2.title = 'ML-corrected: ' + f.mae.ml.toFixed(6);
+    tr.appendChild(cn); tr.appendChild(d1); tr.appendChild(d2);
+    row.appendChild(tr);
+    row.appendChild(el('span', 'cmp-factor', (f.mae.mean / f.mae.ml).toFixed(1) + '\u00d7'));
+    rows.appendChild(row);
+  });
+  x.appendChild(rows);
+}
+
+function renderTech(){
+  var x = document.getElementById('extraPanel');
+  x.innerHTML = '';
+  var d = el('div', 'tech');
+  d.innerHTML =
+    '<h3>Features</h3><p>Quantum-state structure: J, v\u2081, v\u2082, v\u2083, r, p. Theory-disagreement diagnostics: \u0394E<sub>cal</sub> = E<sub>CDSD</sub> \u2212 E<sub>Ames</sub> and |\u0394E<sub>cal</sub>|. Feature ordering matches the trained model exactly.</p>' +
+    '<h3>Hyperparameters</h3><table>' + MODEL_META.map(function(m){ return '<tr><td>' + m[0] + '</td><td>' + m[1] + '</td></tr>'; }).join('') + '</table>' +
+    '<h3>Objective</h3><p>Huber loss (\u03b1 = 0.90): quadratic for small residuals, linear beyond \u2014 robust to isolated large residuals. This is a training-time objective; inference is a deterministic sum of tree leaf values.</p>' +
+    '<h3>Training vs. inference</h3><p>Weighting, the Huber objective, validation splitting and early stopping happen during training only. At inference each state simply traverses every tree and the leaf values are summed \u2014 exactly what this experience replays.</p>' +
+    '<h3>Seed stability</h3><p>Across five independent seeds the overall weighted LOIO MAE is 0.001649 \u00b1 0.000030 cm\u207b\u00b9 (manuscript, Seed stability analysis).</p>' +
+    '<h3>Feature importance</h3><p>The calculated-difference diagnostics collectively account for a substantial fraction of total gain; r and p contribute least but are retained for physical completeness (manuscript, Feature importance).</p>' +
+    '<h3>Limitations</h3><p>The correction transfers less readily for heavy symmetric species (828, 838); the ML/CDSD ratio is largest there. The framework calibrates and flags outliers; it does not replace effective-Hamiltonian fits.</p>';
+  x.appendChild(d);
+}
+
+/* =====================================================================
+   BOOT
+   ===================================================================== */
+document.getElementById('globalRestart').addEventListener('click', function(){
+  state.iso = null; state.pendingIso = null; clearTimers(); goTo(0, scOpen);
+});
+try { validateAll(); } catch(e) { /* dev panel already shown */ }
+setProgress(0);
+scOpen(stageInner);
+</script>
+</body>
+</html>
