@@ -86,7 +86,7 @@
   @keyframes stL{ 0%,100%{ transform:translateX(0);} 50%{ transform:translateX(-6px);} }
   .co2-svg .o-r{ animation:stR 4.5s ease-in-out infinite; }
   .co2-svg .o-l{ animation:stL 4.5s ease-in-out infinite; }
-  .open-title{ font-size:clamp(1.6rem,4.4vw,2.4rem); max-width:22ch; margin:0 auto 1rem; }
+  .open-title{ font-size:clamp(1.6rem,4.4vw,2.4rem); max-width:40ch; margin:0 auto 1rem; }
   .open-sub{ color:var(--dim); font-size:1.05rem; max-width:46ch; margin:0 auto 1.7rem; line-height:1.7; }
 
   /* ================= SCENE 2 — POOL ================= */
@@ -194,7 +194,7 @@
   .bonus-stats{ display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:.7rem; margin-bottom:.9rem; }
   .bonus-stat{ text-align:center; border:1px solid var(--line); padding:.7rem .5rem; }
   .bonus-stat .big{ font-family:var(--font-mono); font-size:1.02rem; color:var(--text); display:block; font-weight:700; }
-  .bonus-stat .small{ font-size:.76rem; color:var(--dim); }
+  .bonus-stat .small{ font-size:.85rem; color:var(--dim); }
   .claim{ text-align:center; font-size:1rem; color:var(--text); margin-bottom:.5rem; }
 
   /* ================= SCENE 10 ================= */
@@ -265,11 +265,11 @@ var ISO_ORDER = ['626','627','628','636','637','638','727','728','737','738','82
 // Feature definitions — ordering MUST match the trained model's feature_names
 var FEATURE_NAMES = ['J','v1','v2','v3','r','p','theory_diff','theory_diff_abs'];
 var FEATURE_DEFS = {
-  J:  { sym:'J', group:'q', desc:'Rotational quantum number \u2014 rotational excitation.' },
+  J:  { sym:'J', group:'q', desc:'Rotational quantum number - rotational excitation.' },
   v1: { sym:'v\u2081', group:'q', desc:'Symmetric-stretch excitation.', mode:'v1' },
   v2: { sym:'v\u2082', group:'q', desc:'Bending-mode excitation.', mode:'v2' },
   v3: { sym:'v\u2083', group:'q', desc:'Asymmetric-stretch excitation.', mode:'v3' },
-  r:  { sym:'r', group:'q', desc:'Fermi-ranking index \u2014 distinguishes states within the rovibrational structure.' },
+  r:  { sym:'r', group:'q', desc:'Fermi-ranking index - distinguishes states within the rovibrational structure.' },
   p:  { sym:'p', group:'q', desc:'Rotationless parity, encoded numerically.' },
   theory_diff:     { sym:'\u0394E<sub>cal</sub>', group:'d', desc:'Signed disagreement between CDSD-296 and Ames-2021.' },
   theory_diff_abs: { sym:'|\u0394E<sub>cal</sub>|', group:'d', desc:'Magnitude of the disagreement between the two calculated descriptions.' }
@@ -427,7 +427,6 @@ function scOpen(t){
       '<g class="o-r"><circle class="atom-o" cx="232" cy="43" r="15"></circle><text x="232" y="76" text-anchor="middle">O</text></g>' +
     '</svg>';
   w.appendChild(el('h1', 'open-title', 'Can AI calibrate the energy levels of a CO<sub>2</sub> isotopologue it has never seen?'));
-  w.appendChild(el('p', 'open-sub', 'Remove one isotopologue from training. Let the other eleven teach the model. Then test the withheld species.'));
   var b = el('button', 'btn', 'Run the experiment');
   b.addEventListener('click', function(){ goTo(1, scPool); });
   w.appendChild(b);
@@ -510,7 +509,7 @@ function scRemove(t){
 
   t.appendChild(el('p', 'scene-msg',
     'Training states from ' + iso + ': <strong>0</strong><br>' +
-    'Every state belonging to ' + iso + ' is excluded from this model \u2014 all <strong>' + f.Neval.toLocaleString() + '</strong> of its MARVEL-known states.'));
+    'Every state belonging to ' + iso + ' is excluded from this model all <strong>' + f.Neval.toLocaleString() + '</strong> of its MARVEL-known states.'));
 
   var btnRow = el('div', 'btn-row');
   var b = el('button', 'btn', 'Continue');
@@ -543,8 +542,8 @@ function scTrain(t){
       tiles +
       '<rect class="chamber" x="240" y="60" width="180" height="92"></rect>' +
       '<text class="chamber-label" x="330" y="52" text-anchor="middle">TRAINING</text>' +
-      '<text x="330" y="98" text-anchor="middle" style="fill:var(--text); font-family:var(--font-mono); font-size:13px;">LightGBM</text>' +
-      '<text x="330" y="118" text-anchor="middle" style="fill:var(--dim); font-family:var(--font-mono); font-size:10px;">residual model</text>' +
+      '<text x="330" y="98" text-anchor="middle" style="fill:var(--text); font-family:var(--font-mono); font-size:20px;">LightGBM</text>' +
+      '<text x="330" y="118" text-anchor="middle" style="fill:var(--dim); font-family:var(--font-mono); font-size:17px;">residual model</text>' +
     '</svg>';
   var holder = el('div'); holder.innerHTML = svg;
   t.appendChild(holder);
@@ -552,7 +551,7 @@ function scTrain(t){
   t.appendChild(el('p', 'record-strip', 'state records: J, v\u2081, v\u2082, v\u2083, r, p, E<sub>Ames</sub>, E<sub>CDSD</sub>, E<sub>MARVEL</sub>'));
   t.appendChild(el('p', 'eq-line', 'E<sub>mean</sub> = \u00bd (E<sub>Ames</sub> + E<sub>CDSD</sub>)'));
   t.appendChild(el('p', 'eq-line', '\u0394E = <span class="hl2">E<sub>MARVEL</sub></span> \u2212 <span class="hl">E<sub>mean</sub></span> &nbsp;\u2192&nbsp; the training target'));
-  t.appendChild(el('p', 'scene-msg', 'The other eleven teach the model how calculation\u2013experiment residuals vary across rovibrational state space.'));
+  /*t.appendChild(el('p', 'scene-msg', 'The other eleven teach the model how calculation-experiment residuals vary across rovibrational state space.'));*/
 
   var btnRow = el('div', 'btn-row');
   var b = el('button', 'btn', 'Meet the eight inputs');
@@ -585,8 +584,7 @@ function scFeatures(t){
     g1.appendChild(card);
   });
   page1.appendChild(g1);
-  page1.appendChild(el('p', 'fine', 'The molecular motion shown is a visual representation of the corresponding normal mode \u2014 a quantum number is not itself a continuous classical motion.'));
-
+  
   var page2 = el('div'); page2.style.display = 'none';
   page2.appendChild(el('p', 'feat-group-title', 'Where do the two calculations disagree?'));
   var g2 = el('div', 'feat-grid');
@@ -595,7 +593,6 @@ function scFeatures(t){
     g2.appendChild(el('div', 'feat-card diag', '<span class="sym">' + d.sym + '</span> \u2014 <span class="desc">' + d.desc + '</span>'));
   });
   page2.appendChild(g2);
-  page2.appendChild(el('p', 'scene-msg', 'Different trees may split on different features \u2014 not every feature appears in every tree\u2019s path.'));
 
   t.appendChild(page1); t.appendChild(page2);
   var btnRow = el('div', 'btn-row');
@@ -651,7 +648,6 @@ function scTrees(t){
   var x = stateVector(s);
   t.appendChild(isoTag());
   t.appendChild(el('h2', 'scene-title', 'How does LightGBM build the correction?'));
-  t.appendChild(el('p', 'scene-msg', 'Each shallow tree asks a small question. Its leaf adds a small contribution. The ensemble combines them.'));
 
   var intro = el('p', 'tj-intro'); intro.id = 'tjIntro';
   var stageHolder = el('div'); stageHolder.id = 'tjStage';
@@ -662,9 +658,7 @@ function scTrees(t){
     '<span class="sub" id="accumSub">0 of ' + jd.trees.length + ' representative trees added</span>';
   t.appendChild(intro); t.appendChild(stageHolder); t.appendChild(featval); t.appendChild(accum);
 
-  t.appendChild(el('p', 'fine',
-    'Representative actual trees from the trained ensemble \u2014 real structures, thresholds and leaf values from the exported fold model. ' +
-    'They are not consecutive boosting rounds, so this panel sums only the shown trees; the remaining ensemble is added next.'));
+
 
   var controls = el('div', 'tj-controls');
   var nextSplit = el('button', 'btn', 'Next split');
@@ -817,11 +811,11 @@ function scApply(t){
       '<text class="chamber-label" x="80" y="32" text-anchor="middle" style="fill:var(--withheld);">' + iso + ' STATES</text>' +
       '<path class="flow" d="M 140 75 L 250 75"></path>' +
       '<rect class="chamber" x="250" y="40" width="160" height="70"></rect>' +
-      '<text x="330" y="70" text-anchor="middle" style="fill:var(--text); font-family:var(--font-mono); font-size:12px;">trained ensemble</text>' +
-      '<text x="330" y="90" text-anchor="middle" style="fill:var(--dim); font-family:var(--font-mono); font-size:10px;">(frozen \u2014 no retraining)</text>' +
+      '<text x="330" y="70" text-anchor="middle" style="fill:var(--text); font-family:var(--font-mono); font-size:15px;">trained ensemble</text>' +
+      '<text x="330" y="90" text-anchor="middle" style="fill:var(--dim); font-family:var(--font-mono); font-size:11px;">(frozen \u2014 no retraining)</text>' +
       '<path class="flow" d="M 410 75 L 520 75"></path>' +
-      '<text x="560" y="70" text-anchor="middle" style="fill:var(--ml); font-family:var(--font-mono); font-size:12px;">\u0394\u00ca</text>' +
-      '<text x="560" y="90" text-anchor="middle" style="fill:var(--dim); font-family:var(--font-mono); font-size:10px;">per state</text>' +
+      '<text x="560" y="70" text-anchor="middle" style="fill:var(--ml); font-family:var(--font-mono); font-size:20px;">\u0394\u00ca</text>' +
+      '<text x="560" y="90" text-anchor="middle" style="fill:var(--dim); font-family:var(--font-mono); font-size:20px;">per state</text>' +
     '</svg>';
   var holder = el('div'); holder.innerHTML = svg;
   t.appendChild(holder);
@@ -872,7 +866,6 @@ function scResult(t){
   });
   t.appendChild(bonus);
   t.appendChild(el('p', 'claim', 'The model achieved this without training on a single state from isotopologue ' + iso + '.'));
-  t.appendChild(el('p', 'fine', 'Real precomputed leave-one-isotopologue-out result.'));
 
   var btnRow = el('div', 'btn-row');
   var b = el('button', 'btn', 'Continue');
