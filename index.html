@@ -89,33 +89,37 @@
   .open-title{ font-size:clamp(1.6rem,4.4vw,2.4rem); max-width:40ch; margin:0 auto 1rem; }
   .open-sub{ color:var(--dim); font-size:1.05rem; max-width:46ch; margin:0 auto 1.7rem; line-height:1.7; }
 
-  /* ================= SCENE 2 — POOL ================= */
-  .pool{ display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); gap:.8rem; max-width:660px; margin:0 auto 1rem; }
+  /* ================= SCENE 2 — DRAG TO WITHHOLD (replaces old pool + removal scenes) ================= */
+  .withdraw-layout{ display:flex; gap:1.6rem; align-items:flex-start; justify-content:center; flex-wrap:wrap; margin-bottom:1rem; }
+  .pool{ display:grid; grid-template-columns:repeat(4, minmax(110px,1fr)); gap:.7rem; max-width:520px; }
   .token{
     display:flex; flex-direction:column; align-items:center; gap:.35rem;
     padding:.85rem .5rem .7rem; border:2px solid var(--line-strong); background:var(--bg2);
     color:var(--text); transition:border-color .18s, transform .18s; min-height:86px;
+    cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none;
   }
   .token:hover{ border-color:var(--accent); transform:translateY(-2px); }
-  .token.is-selected{ border-color:var(--accent); background:var(--bg3); }
   .token.is-visited{ border-style:dashed; border-color:var(--ml); }
+  .token.is-dragging{ cursor:grabbing; border-color:var(--accent); box-shadow:0 10px 26px rgba(0,0,0,.45); z-index:5; position:relative; transition:none; }
+  .token.is-placed{ opacity:0; pointer-events:none; transition:opacity .2s ease; }
+  .token.is-locked{ opacity:.35; pointer-events:none; }
   .token .code{ font-family:var(--font-mono); font-weight:700; font-size:1.05rem; }
   .token svg{ width:56px; height:16px; }
   .token .t-o{ fill:var(--withheld); } .token .t-c{ fill:var(--dim); } .token .t-b{ stroke:var(--line-strong); stroke-width:1.5; }
-  .confirm-line{ text-align:center; font-size:1rem; min-height:1.7em; margin-bottom:.2rem; }
+  .drop-zone{
+    flex:0 0 auto; width:150px; height:150px; border:2px dashed var(--withheld);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.5rem;
+    transition:border-color .2s ease, background .2s ease;
+  }
+  .drop-zone.is-drag-over{ border-color:var(--accent); border-style:solid; background:rgba(83,200,240,.08); }
+  .drop-zone.is-filled{ border-style:solid; border-color:var(--withheld); cursor:pointer; }
+  .drop-zone-label{ font-size:.72rem; letter-spacing:.12em; color:var(--withheld); text-transform:uppercase; font-family:var(--font-mono); }
+  .drop-zone-hint{ font-size:.68rem; color:var(--dim2); text-align:center; padding:0 .6rem; }
+  .placed-token{ display:flex; flex-direction:column; align-items:center; gap:.3rem; }
+  .placed-token .code{ font-family:var(--font-mono); font-weight:700; font-size:1.25rem; color:var(--text); }
+  .placed-token .eject-hint{ font-size:.62rem; color:var(--dim2); }
+  .confirm-line{ text-align:center; font-size:1rem; min-height:1.7em; margin-bottom:.2rem; max-width:60ch; margin-left:auto; margin-right:auto; }
   .confirm-line b{ color:var(--accent); }
-
-  /* ================= SCENE 3 — REMOVAL ================= */
-  .removal-svg{ width:min(640px,94vw); height:auto; display:block; margin:0 auto .8rem; }
-  .removal-svg .pool-tile rect{ fill:var(--bg2); stroke:var(--line-strong); stroke-width:1.4; }
-  .removal-svg .pool-tile text{ fill:var(--dim); font-family:var(--font-mono); font-size:11px; }
-  .removal-svg .sel-tile rect{ fill:var(--bg3); stroke:var(--accent); stroke-width:2; }
-  .removal-svg .sel-tile text{ fill:var(--text); font-family:var(--font-mono); font-size:11px; font-weight:700; }
-  .removal-svg .chamber{ fill:none; stroke:var(--withheld); stroke-width:2; stroke-dasharray:6 5; }
-  .removal-svg .chamber-label{ fill:var(--withheld); font-family:var(--font-mono); font-size:11px; font-weight:700; }
-  .removal-svg .arm{ stroke:var(--dim); stroke-width:5; stroke-linecap:round; fill:none; }
-  .removal-svg .arm-claw{ stroke:var(--accent); stroke-width:3; fill:none; stroke-linecap:round; }
-  .arm-group, .carried{ transition:transform 1.6s cubic-bezier(.4,0,.2,1); }
 
   /* ================= SCENE 4 — TRAINING ================= */
   .train-svg{ width:min(620px,94vw); height:auto; display:block; margin:0 auto .6rem; }
@@ -355,7 +359,7 @@ function validateAll(){
 /* =====================================================================
    SECTION 3 — APP STATE + TRANSITIONS
    ===================================================================== */
-var SCENES = ['open','pool','remove','train','features','trees','forward','apply','result','continue'];
+var SCENES = ['open','withdraw','train','features','trees','forward','apply','result','continue'];
 var state = { scene:0, iso:null, visited:{}, timers:[], tj:null, pendingIso:null };
 var REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 var stageInner = document.getElementById('stageInner');
@@ -428,101 +432,130 @@ function scOpen(t){
     '</svg>';
   w.appendChild(el('h1', 'open-title', 'Can AI calibrate the energy levels of a CO<sub>2</sub> isotopologue it has never seen?'));
   var b = el('button', 'btn', 'Run the experiment');
-  b.addEventListener('click', function(){ goTo(1, scPool); });
+  b.addEventListener('click', function(){ goTo(1, scWithdraw); });
   w.appendChild(b);
   t.appendChild(w);
 }
 
-/* Scene 2 — the isotopologue pool with confirmation */
-function scPool(t){
-  t.appendChild(el('h2', 'scene-title', 'Choose one isotopologue to withhold completely.'));
+/* Scene 2 — drag an isotopologue out of the pool into the withheld zone.
+   A plain click/tap (or Enter/Space on a focused tile) commits the same
+   selection instantly, so the interaction stays fully keyboard-operable
+   without requiring an actual drag gesture. */
+function scWithdraw(t){
+  t.appendChild(el('h2', 'scene-title', 'Drag one isotopologue out of the pool to withhold it completely.'));
+
+  var layout = el('div', 'withdraw-layout');
   var pool = el('div', 'pool'); pool.setAttribute('role', 'group'); pool.setAttribute('aria-label', 'Twelve CO2 isotopologues');
+  var dropZone = el('div', 'drop-zone');
+  dropZone.innerHTML = '<span class="drop-zone-label">Withheld</span><span class="drop-zone-hint">drop here</span>';
+
   var confirmLine = el('p', 'confirm-line', '&nbsp;');
-  var btnRow = el('div', 'btn-row');
-  var okBtn = el('button', 'btn', 'Withhold it');
-  var otherBtn = el('button', 'btn btn-ghost', 'Choose another');
-  okBtn.style.display = 'none'; otherBtn.style.display = 'none';
+  var btnRow = el('div', 'btn-row'); btnRow.style.display = 'none';
+  var contBtn = el('button', 'btn', 'Continue');
+  contBtn.addEventListener('click', function(){ goTo(2, scTrain); });
+  btnRow.appendChild(contBtn);
 
   function tokenGlyph(){
     return '<svg viewBox="0 0 56 16" aria-hidden="true">' +
       '<line class="t-b" x1="12" y1="8" x2="24" y2="8"></line><line class="t-b" x1="32" y1="8" x2="44" y2="8"></line>' +
       '<circle class="t-o" cx="8" cy="8" r="5"></circle><circle class="t-c" cx="28" cy="8" r="4"></circle><circle class="t-o" cx="48" cy="8" r="5"></circle></svg>';
   }
+
+  function commitSelection(iso, tk){
+    var f = LOIO_RESULTS[iso];
+    state.iso = iso; state.tj = JOURNEY[iso];
+    tk.classList.add('is-placed');
+    Array.prototype.forEach.call(pool.children, function(c){ if (c !== tk) c.classList.add('is-locked'); });
+    dropZone.classList.add('is-filled');
+    dropZone.innerHTML = '<div class="placed-token"><span class="code">' + iso + '</span><span class="eject-hint">tap to choose another</span></div>';
+    dropZone.onclick = function(){ releaseSelection(tk); };
+    confirmLine.innerHTML = 'Isotopologue <b>' + iso + '</b> is withheld. Training states from ' + iso + ': <b>0</b> \u2014 every state belonging to ' + iso + ' is excluded from this model, all ' + f.Neval.toLocaleString() + ' of its MARVEL-known states.';
+    btnRow.style.display = '';
+  }
+  function releaseSelection(tk){
+    state.iso = null; state.tj = null;
+    tk.style.transition = ''; tk.style.transform = ''; tk.style.opacity = '';
+    tk.classList.remove('is-placed');
+    Array.prototype.forEach.call(pool.children, function(c){ c.classList.remove('is-locked'); });
+    dropZone.classList.remove('is-filled');
+    dropZone.onclick = null;
+    dropZone.innerHTML = '<span class="drop-zone-label">Withheld</span><span class="drop-zone-hint">drop here</span>';
+    confirmLine.innerHTML = '&nbsp;';
+    btnRow.style.display = 'none';
+  }
+
+  function wireDrag(tk, iso){
+    var active = false, moved = false, pointerId = null, startX, startY;
+
+    tk.addEventListener('pointerdown', function(e){
+      if (tk.classList.contains('is-placed')) return;
+      active = true; moved = false; pointerId = e.pointerId;
+      startX = e.clientX; startY = e.clientY;
+      tk.setPointerCapture(pointerId);
+    });
+
+    tk.addEventListener('pointermove', function(e){
+      if (!active || e.pointerId !== pointerId) return;
+      var dx = e.clientX - startX, dy = e.clientY - startY;
+      if (!moved && Math.hypot(dx, dy) > 6){ moved = true; tk.classList.add('is-dragging'); }
+      if (moved){
+        tk.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+        var dz = dropZone.getBoundingClientRect();
+        var over = e.clientX >= dz.left && e.clientX <= dz.right && e.clientY >= dz.top && e.clientY <= dz.bottom;
+        dropZone.classList.toggle('is-drag-over', over && !dropZone.classList.contains('is-filled'));
+      }
+    });
+
+    function endDrag(e){
+      if (!active || e.pointerId !== pointerId) return;
+      active = false;
+      dropZone.classList.remove('is-drag-over');
+      if (moved){
+        tk.classList.remove('is-dragging');
+        var dz = dropZone.getBoundingClientRect();
+        var over = e.clientX >= dz.left && e.clientX <= dz.right && e.clientY >= dz.top && e.clientY <= dz.bottom;
+        if (over && !dropZone.classList.contains('is-filled')){
+          tk.style.transform = '';
+          commitSelection(iso, tk);
+        } else if (!REDUCED) {
+          tk.style.transition = 'transform .35s cubic-bezier(.4,0,.2,1)';
+          tk.style.transform = '';
+          setTimeout(function(){ tk.style.transition = ''; }, 380);
+        } else {
+          tk.style.transform = '';
+        }
+      }
+      // `moved` is deliberately left as-is here -- the click handler below
+      // checks it once (to suppress the ghost click a real drag produces)
+      // and clears it itself, so a later plain tap still registers.
+    }
+    tk.addEventListener('pointerup', endDrag);
+    tk.addEventListener('pointercancel', endDrag);
+
+    tk.addEventListener('click', function(){
+      if (moved){ moved = false; return; }
+      if (tk.classList.contains('is-placed')) return;
+      if (REDUCED){ commitSelection(iso, tk); return; }
+      var tr = tk.getBoundingClientRect(), dz = dropZone.getBoundingClientRect();
+      var dx = (dz.left + dz.width / 2) - (tr.left + tr.width / 2);
+      var dy = (dz.top + dz.height / 2) - (tr.top + tr.height / 2);
+      tk.style.transition = 'transform .45s cubic-bezier(.4,0,.2,1)';
+      tk.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(.6)';
+      setTimeout(function(){ commitSelection(iso, tk); }, 460);
+    });
+  }
+
   ISO_ORDER.forEach(function(iso){
     var tk = el('button', 'token' + (state.visited[iso] ? ' is-visited' : ''));
+    tk.type = 'button';
     tk.innerHTML = '<span class="code">' + iso + '</span>' + tokenGlyph();
-    tk.setAttribute('aria-label', 'Isotopologue ' + iso + ', ' + isoComposition(iso));
-    tk.addEventListener('click', function(){
-      state.pendingIso = iso;
-      Array.prototype.forEach.call(pool.children, function(c){ c.classList.remove('is-selected'); });
-      tk.classList.add('is-selected');
-      confirmLine.innerHTML = 'Withhold <b>' + iso + '</b> (' + isoComposition(iso) + ') from training?';
-      okBtn.style.display = 'inline-block'; otherBtn.style.display = 'inline-block';
-    });
+    tk.setAttribute('aria-label', 'Isotopologue ' + iso + ', ' + isoComposition(iso) + ' \u2014 drag out or press Enter to withhold');
     pool.appendChild(tk);
+    wireDrag(tk, iso);
   });
-  okBtn.addEventListener('click', function(){
-    state.iso = state.pendingIso;
-    state.tj = JOURNEY[state.iso];
-    goTo(2, scRemove);
-  });
-  otherBtn.addEventListener('click', function(){
-    state.pendingIso = null;
-    Array.prototype.forEach.call(pool.children, function(c){ c.classList.remove('is-selected'); });
-    confirmLine.innerHTML = '&nbsp;';
-    okBtn.style.display = 'none'; otherBtn.style.display = 'none';
-  });
-  btnRow.appendChild(okBtn); btnRow.appendChild(otherBtn);
-  t.appendChild(pool); t.appendChild(confirmLine); t.appendChild(btnRow);
-}
 
-/* Scene 3 — a laboratory manipulator removes the selected isotopologue */
-function scRemove(t){
-  var iso = state.iso, f = LOIO_RESULTS[iso];
-  t.appendChild(el('h2', 'scene-title', 'Isotopologue ' + iso + ' is withheld.'));
-  var others = ISO_ORDER.filter(function(x){ return x !== iso; });
-
-  // Grid of 11 remaining tiles + the selected one being carried by the arm
-  var tiles = '';
-  others.forEach(function(o, i){
-    var cx = 40 + (i % 6) * 62, cy = 150 + Math.floor(i / 6) * 40;
-    tiles += '<g class="pool-tile"><rect x="' + (cx - 24) + '" y="' + (cy - 12) + '" width="48" height="24" rx="2"></rect>' +
-             '<text x="' + cx + '" y="' + (cy + 4) + '" text-anchor="middle">' + o + '</text></g>';
-  });
-  var svg =
-    '<svg class="removal-svg" viewBox="0 0 640 230" role="img" aria-label="A manipulator moves ' + iso + ' into the withheld chamber">' +
-      tiles +
-      '<rect class="chamber" x="480" y="120" width="140" height="90"></rect>' +
-      '<text class="chamber-label" x="550" y="112" text-anchor="middle">WITHHELD</text>' +
-      // two-segment manipulator arm; the whole group translates
-      '<g class="arm-group" id="armGroup">' +
-        '<path class="arm" d="M 40 8 L 120 30 L 175 78"></path>' +
-        '<path class="arm-claw" d="M 165 86 L 175 78 L 186 85"></path>' +
-      '</g>' +
-      '<g class="carried" id="carried">' +
-        '<g class="sel-tile"><rect x="151" y="90" width="48" height="24" rx="2"></rect>' +
-        '<text x="175" y="106" text-anchor="middle">' + iso + '</text></g>' +
-      '</g>' +
-    '</svg>';
-  var holder = el('div'); holder.innerHTML = svg;
-  t.appendChild(holder);
-
-  t.appendChild(el('p', 'scene-msg',
-    'Training states from ' + iso + ': <strong>0</strong><br>' +
-    'Every state belonging to ' + iso + ' is excluded from this model all <strong>' + f.Neval.toLocaleString() + '</strong> of its MARVEL-known states.'));
-
-  var btnRow = el('div', 'btn-row');
-  var b = el('button', 'btn', 'Continue');
-  btnRow.appendChild(b);
-  t.appendChild(btnRow);
-  b.addEventListener('click', function(){ goTo(3, scTrain); });
-
-  // Animate the arm carrying the tile into the chamber (reduced motion: instant transfer)
-  after(500, function(){
-    var arm = document.getElementById('armGroup'), car = document.getElementById('carried');
-    if (arm) arm.style.transform = 'translate(375px, 60px)';
-    if (car) car.style.transform = 'translate(375px, 60px)';
-  });
+  layout.appendChild(pool); layout.appendChild(dropZone);
+  t.appendChild(layout); t.appendChild(confirmLine); t.appendChild(btnRow);
 }
 
 /* Scene 4 — the other eleven enter training */
@@ -555,7 +588,7 @@ function scTrain(t){
 
   var btnRow = el('div', 'btn-row');
   var b = el('button', 'btn', 'Meet the eight inputs');
-  b.addEventListener('click', function(){ goTo(4, scFeatures); });
+  b.addEventListener('click', function(){ goTo(3, scFeatures); });
   btnRow.appendChild(b);
   t.appendChild(btnRow);
 }
@@ -599,7 +632,7 @@ function scFeatures(t){
   var next = el('button', 'btn', 'Next');
   next.addEventListener('click', function(){
     if (page2.style.display === 'none'){ page1.style.display = 'none'; page2.style.display = 'block'; next.textContent = 'Enter the trees'; }
-    else goTo(5, scTrees);
+    else goTo(4, scTrees);
   });
   btnRow.appendChild(next);
   t.appendChild(btnRow);
@@ -717,7 +750,7 @@ function scTrees(t){
     } else {
       // move to next tree or finish
       if (tj.treeIdx < jd.trees.length - 1){ tj.treeIdx++; loadTree(tj.treeIdx); }
-      else { tj.done = true; goTo(6, scForward); return; }
+      else { tj.done = true; goTo(5, scForward); return; }
     }
     if (tj.auto && !tj.done) after(1050, stepOnce);
   }
@@ -732,7 +765,7 @@ function scTrees(t){
   nextSplit.addEventListener('click', function(){ tj.auto = false; pauseBtn.style.display = 'none'; autoBtn.style.display = 'inline-block'; stepOnce(); });
   autoBtn.addEventListener('click', function(){ tj.auto = true; autoBtn.style.display = 'none'; pauseBtn.style.display = 'inline-block'; stepOnce(); });
   pauseBtn.addEventListener('click', function(){ tj.auto = false; pauseBtn.style.display = 'none'; autoBtn.style.display = 'inline-block'; clearTimers(); });
-  skipBtn.addEventListener('click', function(){ tj.done = true; clearTimers(); goTo(6, scForward); });
+  skipBtn.addEventListener('click', function(){ tj.done = true; clearTimers(); goTo(5, scForward); });
 
   loadTree(0);
   state.tjMachine = tj;
@@ -772,7 +805,7 @@ function scForward(t){
   var btnRow = el('div', 'btn-row');
   var b = el('button', 'btn', 'Apply the model to the withheld isotopologue');
   b.style.display = 'none';
-  b.addEventListener('click', function(){ goTo(7, scApply); });
+  b.addEventListener('click', function(){ goTo(6, scApply); });
   btnRow.appendChild(b);
   t.appendChild(btnRow);
 
@@ -821,7 +854,7 @@ function scApply(t){
   t.appendChild(holder);
   var btnRow = el('div', 'btn-row');
   var b = el('button', 'btn', 'Reveal the fold result');
-  b.addEventListener('click', function(){ goTo(8, scResult); });
+  b.addEventListener('click', function(){ goTo(7, scResult); });
   btnRow.appendChild(b);
   t.appendChild(btnRow);
 }
@@ -869,7 +902,7 @@ function scResult(t){
 
   var btnRow = el('div', 'btn-row');
   var b = el('button', 'btn', 'Continue');
-  b.addEventListener('click', function(){ goTo(9, scContinue); });
+  b.addEventListener('click', function(){ goTo(8, scContinue); });
   btnRow.appendChild(b);
   t.appendChild(btnRow);
 }
@@ -881,7 +914,7 @@ function scContinue(t){
   var again = el('button', 'btn', 'Try another isotopologue');
   var cmp = el('button', 'btn btn-ghost', 'Compare all twelve');
   var tech = el('button', 'btn btn-ghost', 'Explore technical details');
-  again.addEventListener('click', function(){ state.iso = null; state.pendingIso = null; goTo(1, scPool); });
+  again.addEventListener('click', function(){ state.iso = null; state.pendingIso = null; goTo(1, scWithdraw); });
   cmp.addEventListener('click', function(){ renderCompare(t); });
   tech.addEventListener('click', function(){ renderTech(t); });
   btnRow.appendChild(again); btnRow.appendChild(cmp); btnRow.appendChild(tech);
